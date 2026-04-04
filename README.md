@@ -1,8 +1,10 @@
 # GROUP 8 LINKS
 MEETINGS: https://meet.google.com/nti-yvpk-hep 
+
 GIT: https://github.com/s4ddo/wsi-classification
 
 PROPOSAL DOC: https://www.overleaf.com/3688327964zrmjmtvdqmbr#0ab1c7
+
 PROPOSAL SLIDES: https://docs.google.com/presentation/d/1vZxLqMin-MPBKMCmqo7ROCraEf6gkTVhrmOrcaBvulw/edit?usp=sharing
 
 PAPERS: https://docs.google.com/spreadsheets/d/15vAzjMTW5EqeDnXdtYJdurr6HRA8BZmWQh5ADRQ5NMk/edit?usp=sharing
