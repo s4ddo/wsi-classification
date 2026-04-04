@@ -1,0 +1,76 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wsi-classification"
+version = "0.1.0"
+description = "Sparse-attention ViT for Whole-Slide Image classification, benchmarked against MIL methods"
+requires-python = ">=3.11"
+dependencies = [
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "torchmetrics>=1.0.0",
+    "pytorch-lightning>=2.0.0",
+    "omegaconf>=2.3.0",
+    "wandb>=0.15.0",
+    "rich>=13.0.0",
+    "numpy>=1.21.0",
+    "Pillow",
+    "h5py",
+    "pandas",
+]
+
+[project.optional-dependencies]
+slide = [
+    "dlup",
+    "openslide-python",
+    "tiatoolbox",
+    "monai",
+    "cucim",
+]
+dev = [
+    "pytest>=7.0.0",
+    "ruff>=0.1.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["wsi_classification*"]
+
+[tool.ruff]
+line-length = 119
+
+[tool.ruff.lint]
+ignore = ["C901", "D100", "E501", "E741", "RUF005", "RUF010"]
+select = [
+    "C",   # Pylint conventions
+    "D",   # Documentation formatting
+    "E",   # style stuff, whitespaces
+    "F",   # important pyflakes lints
+    "I",   # import sorting
+    "RUF", # Some Ruff-specific lints, unused noqas, etc.
+    "W",   # Pylint warnings
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["D104", "E402", "F401", "F403", "F811"]
+"test_*.py" = ["D"]
+"conftest.py" = ["D"]
+"scripts/*.py" = ["D"]
+
+[tool.ruff.lint.isort]
+lines-after-imports = 2
+known-first-party = ["wsi_classification"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+xfail_strict = true
+addopts = [
+    "--durations-min=10.0",
+    "--durations=0",
+]
+markers = ["slow: marks tests as slow (deselect with '-m \"not slow\"')"]
