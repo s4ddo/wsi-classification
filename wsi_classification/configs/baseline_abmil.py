@@ -15,8 +15,9 @@ from wsi_classification.experiments.lightning_wrappers.mil_wrapper import MILWra
 from wsi_classification.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
 
 # ─── Data Details ──────────────────────────────────────────────
-CSV_BASE = "/media/davidwessels/ananas/data/David-SELECT-AI/csvs/multibiomarker"
-FEATURES_DIR = "/media/davidwessels/ananas/data/David-SELECT-AI/outputs/virchow_tissue_features"
+TRAIN_CSV = "student_debugging_dataset_train.csv"
+VAL_CSV = "student_debugging_dataset_val.csv"
+FEATURES_DIR = "student_debugging_dataset"
 
 # ─── Hyperparameters ─────────────────────────────────────────────
 BATCH_SIZE = 1 # Standard for MIL bags
@@ -39,10 +40,10 @@ def get_config() -> ExperimentConfig:
 
     # Dataset: Connects to your H5 extraction
     config.dataset = LazyConfig(H5FeatureBagDataModule)(
-        train_csv=f"{CSV_BASE}/combined_tcga_amc_part1.csv",
-        val_csv=f"{CSV_BASE}/combined_tcga_amc_part1.csv", # Replace with actual val split!
+        train_csv=TRAIN_CSV,
+        val_csv=VAL_CSV,
         features_dir=FEATURES_DIR,
-        label_col_name="tmb_binary", # Changed from 'label' to an actual column present in the CSV
+        label_col_name="tmb_binary",
         batch_size=BATCH_SIZE,
         num_workers=NUM_WORKERS
     )

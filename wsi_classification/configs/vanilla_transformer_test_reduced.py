@@ -19,7 +19,8 @@ from wsi_classification.experiments.lightning_wrappers.mil_wrapper import MILWra
 from wsi_classification.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
 
 # ─── Data Details ──────────────────────────────────────────────
-CSV_PATH = "student_debugging_dataset.csv"
+TRAIN_CSV = "student_debugging_dataset_train.csv"
+VAL_CSV = "student_debugging_dataset_val.csv"
 # Using 256-dim reduced features (from 1280-dim original)
 FEATURES_DIR = "student_debugging_dataset_reduced_256dim"
 
@@ -47,8 +48,8 @@ def get_config() -> ExperimentConfig:
 
     # Dataset: H5 feature bags from reduced-dimension dataset
     config.dataset = LazyConfig(H5FeatureBagDataModule)(
-        train_csv=CSV_PATH,
-        val_csv=CSV_PATH,
+        train_csv=TRAIN_CSV,
+        val_csv=VAL_CSV,
         features_dir=FEATURES_DIR,
         label_col_name="tmb_binary",
         batch_size=BATCH_SIZE,
