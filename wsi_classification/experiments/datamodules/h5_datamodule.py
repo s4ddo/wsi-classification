@@ -1,6 +1,8 @@
 import pytorch_lightning as pl
 import torch
 from torch.utils.data import DataLoader
+import h5py
+from pathlib import Path
 
 from wsi_classification.datasets.h5_slidedataset.h5_dataset import H5FeatureBagDataset
 
@@ -61,8 +63,22 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
         self.label_col_name = label_col_name
         self.batch_size = batch_size
         self.num_workers = num_workers
-        self.input_channels = 1280
+        # Will be set in prepare_data() by inferring from actual H5 files
+        self.input_channels = None
         self.output_channels = 1
+
+    def prepare_data(self) -> None:
+        """Infer feature dimension from first H5 file in features_dir."""
+        if self.input_channels is None:
+            features_dir = Path(self.features_dir)
+            h5_files = list(features_dir.glob("*.h5"))
+            if h5_files:
+                with h5py.File(h5_files[0], "r") as f:
+                    if "features" in f:
+                        feature_shape = f["features"].shape
+                        self.input_channels = feature_shape[1]
+            if self.input_channels is None:
+                self.input_channels = 1280
 
     def setup(self, stage: str | None = None) -> None:
         """Instantiate train and validation datasets.

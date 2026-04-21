@@ -303,6 +303,15 @@ class LightningWrapperBase(pl.LightningModule):
         self.other_outputs_train = []
         self.other_outputs_validation = []
 
+        # Initialize timing attributes
+        self._cuda_start_event = None
+        self._cuda_forward_end_event = None
+        self._cuda_backward_end_event = None
+        self._timing_forward_accum = 0.0
+        self._timing_backward_accum = 0.0
+        self._timing_step_count = 0
+        self.timing_log_interval = 100
+
     def forward(self, input_and_condition: dict[str, torch.Tensor]):
         """Forward pass of the network.
 
