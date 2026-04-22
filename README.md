@@ -5,7 +5,7 @@ GIT: https://github.com/s4ddo/wsi-classification
 
 PROPOSAL DOC: https://www.overleaf.com/3688327964zrmjmtvdqmbr#0ab1c7
 
-PROPOSAL SLIDES: https://docs.google.com/presentation/d/1ZMjIyQuakQ28kwaN7wx0sG7TXUeGcOklpSFN4oDrTnM/edit?slide=id.p#slide=id.p
+PROPOSAL SLIDES: https://docs.google.com/presentation/d/1vZxLqMin-MPBKMCmqo7ROCraEf6gkTVhrmOrcaBvulw/edit?usp=sharing
 
 PAPERS: https://docs.google.com/spreadsheets/d/15vAzjMTW5EqeDnXdtYJdurr6HRA8BZmWQh5ADRQ5NMk/edit?usp=sharing
 
