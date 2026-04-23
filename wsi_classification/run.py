@@ -169,7 +169,6 @@ def main() -> None:
             id=attach_run_id,
             resume="allow",
             name=run_name,
-            config=dataclasses.asdict(config),  # Convert dataclass config to dict
             log_model=log_model,
             offline=offline,
             save_code=True,
