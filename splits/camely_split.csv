@@ -1,4 +1,4 @@
-filename,split,label
+slidename,split,label
 normal_062.h5,train,normal
 normal_091.h5,train,normal
 normal_120.h5,train,normal
