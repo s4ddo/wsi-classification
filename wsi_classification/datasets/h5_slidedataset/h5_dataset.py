@@ -76,8 +76,12 @@ class H5FeatureBagDataset(Dataset):
         h5_path = item["h5_path"]
         
         with h5py.File(h5_path, "r") as f:
-            features = f["features"][:] # shape: (N_patches, 1280)
-            coords = f["coords"][:]     # shape: (N_patches, 2)
+            if "features" not in f or "coords" not in f:
+                features = f["embeddings"][:] # shape: (N_patches, 1280)
+                coords = f["coordinates"][:]     # shape: (N_patches, 2)
+            else:
+                features = f["features"][:] # shape: (N_patches, 1280)
+                coords = f["coords"][:]     # shape: (N_patches, 2)
             
         features_t = torch.from_numpy(features).float()
         coords_t = torch.from_numpy(coords).float()
