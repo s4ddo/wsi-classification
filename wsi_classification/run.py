@@ -226,10 +226,11 @@ def main() -> None:
         model,
         datamodule=datamodule,
     )
-    trainer.test(
-        model,
-        datamodule=datamodule,
-    )
+    if config.test.do:
+        trainer.test(
+            model,
+            datamodule=datamodule,
+        )
 
 
 if __name__ == "__main__":

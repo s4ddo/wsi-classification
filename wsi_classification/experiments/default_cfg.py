@@ -25,6 +25,13 @@ class TrainConfig:
 
 
 @dataclass
+class TestConfig:
+    """Test configuration."""
+
+    do: bool = True
+
+
+@dataclass
 class TrainerConfig:
     """Lightning Trainer configuration overrides."""
 
@@ -105,6 +112,7 @@ class ExperimentConfig:
 
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
     train: TrainConfig = field(default_factory=TrainConfig)
+    test: TestConfig = field(default_factory=TestConfig)
     trainer: TrainerConfig = field(default_factory=TrainerConfig)
     wandb: WandbConfig = field(default_factory=WandbConfig)
 
