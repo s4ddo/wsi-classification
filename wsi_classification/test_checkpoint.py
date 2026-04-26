@@ -95,13 +95,14 @@ def main() -> None:
         offline = True
     else:
         run_id = wandb.util.generate_id()
+        offline = False
         wandb_logger = WandbLogger(
             project=config.wandb.project,
             entity=config.wandb.entity,
             save_dir=experiment_dir,
             id=run_id,
             name=f"{checkpoint_path.parent.parent.name}-test",
-            offline=offline := False,
+            offline=offline,
             save_code=False,
             group=config.wandb.job_group,
         )
