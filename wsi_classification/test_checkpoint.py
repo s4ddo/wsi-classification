@@ -18,7 +18,6 @@ import wandb
 from wsi_classification.experiments.trainer import construct_trainer
 from wsi_classification.experiments.utils.cli import (
     apply_config_overrides,
-    config_to_dict_for_rich,
     verify_no_interpolator_overwrites,
     load_config_from_file,
 )

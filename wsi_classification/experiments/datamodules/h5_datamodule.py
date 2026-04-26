@@ -55,10 +55,12 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
         label_col_name: str = "label",
         batch_size: int = 1,
         num_workers: int = 4,
+        test_csv: str | None = None,
     ):
         super().__init__()
         self.train_csv = train_csv
         self.val_csv = val_csv
+        self.test_csv = test_csv
         self.features_dir = features_dir
         self.label_col_name = label_col_name
         self.batch_size = batch_size
@@ -81,10 +83,10 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
                 self.input_channels = 1280
 
     def setup(self, stage: str | None = None) -> None:
-        """Instantiate train and validation datasets.
+        """Instantiate train, validation, and test datasets.
 
         Args:
-            stage: Either ``"fit"`` or ``None``; only ``"fit"`` is supported.
+            stage: Either ``"fit"``, ``"test"``, or ``None``.
         """
         if stage in ("fit", None):
             self.train_dataset = H5FeatureBagDataset(
@@ -94,6 +96,12 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
             )
             self.val_dataset = H5FeatureBagDataset(
                 csv_path=self.val_csv,
+                features_dir=self.features_dir,
+                label_col_name=self.label_col_name,
+            )
+        if stage in ("test", None) and self.test_csv is not None:
+            self.test_dataset = H5FeatureBagDataset(
+                csv_path=self.test_csv,
                 features_dir=self.features_dir,
                 label_col_name=self.label_col_name,
             )
@@ -113,6 +121,19 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
         """Return the validation DataLoader."""
         return DataLoader(
             self.val_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+            collate_fn=mil_collate_fn,
+            pin_memory=True,
+        )
+
+    def test_dataloader(self) -> DataLoader:
+        """Return the test DataLoader."""
+        if not hasattr(self, "test_dataset"):
+            raise RuntimeError("Test dataset not initialized. Ensure test_csv is provided in config.")
+        return DataLoader(
+            self.test_dataset,
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,
