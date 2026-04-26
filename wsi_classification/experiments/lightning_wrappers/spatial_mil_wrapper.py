@@ -58,6 +58,9 @@ class SpatialMILWrapper(MILWrapper):
             preds = torch.argmax(logits, dim=-1)
             probs = torch.softmax(logits, dim=-1)
 
+        # Update accuracy metric
+        self.test_acc.update(preds, labels)
+
         # Log predictions per slide
         for slide_name, pred, prob, label in zip(slide_names, preds, probs, labels):
             self.log_dict(

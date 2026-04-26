@@ -40,6 +40,7 @@ class ClassificationWrapper(LightningWrapperBase):
             acc_kwargs = {"task": "binary"}
         self.train_acc = torchmetrics.Accuracy(**acc_kwargs)
         self.val_acc = torchmetrics.Accuracy(**acc_kwargs)
+        self.test_acc = torchmetrics.Accuracy(**acc_kwargs)
 
         # Loss metric
         # DeitIII proposes to use BCEWithLogitsLoss for multiclass classification
@@ -281,9 +282,15 @@ class ClassificationWrapper(LightningWrapperBase):
 
     def test_step(self, batch, batch_idx):
         """Perform a test step and log predictions."""
-        # Perform step (no accuracy tracking for test)
-        predictions, loss, other_outputs = self._step(batch, self.val_acc)
+        # Perform step with test accuracy tracking
+        predictions, loss, other_outputs = self._step(batch, self.test_acc)
         # Log test loss
         self.log("test/loss", loss, sync_dist=self.distributed)
         # Return loss
         return loss
+
+    def on_test_epoch_end(self):
+        """Log epoch-level test accuracy."""
+        test_acc = self.test_acc.compute()
+        self.log("test/acc", test_acc, sync_dist=self.distributed)
+        self.test_acc.reset()

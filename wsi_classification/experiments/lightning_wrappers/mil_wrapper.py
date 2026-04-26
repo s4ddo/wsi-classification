@@ -35,6 +35,7 @@ class MILWrapper(LightningWrapperBase):
 
         self.train_acc = torchmetrics.Accuracy(**acc_kwargs)
         self.val_acc = torchmetrics.Accuracy(**acc_kwargs)
+        self.test_acc = torchmetrics.Accuracy(**acc_kwargs)
 
         self.use_bce_loss = use_bce_loss
         if self.multiclass and not self.use_bce_loss:
@@ -139,6 +140,9 @@ class MILWrapper(LightningWrapperBase):
             preds = torch.argmax(logits, dim=-1)
             probs = torch.softmax(logits, dim=-1)
 
+        # Update accuracy metric
+        self.test_acc.update(preds, labels)
+
         # Log predictions per slide
         for slide_name, pred, prob, label in zip(slide_names, preds, probs, labels):
             self.log_dict(
@@ -149,3 +153,9 @@ class MILWrapper(LightningWrapperBase):
                 },
                 sync_dist=True,
             )
+
+    def on_test_epoch_end(self) -> None:
+        """Log epoch-level test accuracy and reset the accumulator."""
+        acc = self.test_acc.compute()
+        self.log("test/acc", acc, sync_dist=True)
+        self.test_acc.reset()
