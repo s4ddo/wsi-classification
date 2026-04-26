@@ -4,12 +4,17 @@ import torch.nn.functional as F
 
 
 class _SimplifiedMLA(nn.Module):
-    """Multi-Head Latent Attention: compresses K/V through a bottleneck before attending."""
+    """Multi-Head Latent Attention with sparse local window for large sequences.
 
-    def __init__(self, dim: int, num_heads: int, latent_dim: int):
+    For large WSI bags (>10K patches), uses local window attention to reduce memory while
+    preserving spatial locality. For small sequences, uses full attention.
+    """
+
+    def __init__(self, dim: int, num_heads: int, latent_dim: int, window_size: int = 512):
         super().__init__()
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
+        self.window_size = window_size
 
         self.q_proj = nn.Linear(dim, dim)
         self.kv_down = nn.Linear(dim, latent_dim)
@@ -27,8 +32,31 @@ class _SimplifiedMLA(nn.Module):
         k = k.reshape(B, N, self.num_heads, self.head_dim).transpose(1, 2)
         v = v.reshape(B, N, self.num_heads, self.head_dim).transpose(1, 2)
 
-        out = F.scaled_dot_product_attention(q, k, v)
+        if N > 10000:
+            out = self._sparse_local_attention(q, k, v)
+        else:
+            out = F.scaled_dot_product_attention(q, k, v)
+
         return self.out_proj(out.transpose(1, 2).reshape(B, N, C))
+
+    def _sparse_local_attention(self, q: torch.Tensor, k: torch.Tensor,
+                               v: torch.Tensor) -> torch.Tensor:
+        """Local window attention using sliding window (±window_size)."""
+        B, H, N, D = q.shape
+        w = self.window_size
+
+        k_pad = F.pad(k.transpose(2, 3), (w, w)).transpose(2, 3)
+        v_pad = F.pad(v.transpose(2, 3), (w, w)).transpose(2, 3)
+
+        out = torch.zeros_like(q)
+        for i in range(N):
+            k_win = k_pad[:, :, i:i+2*w+1, :]
+            v_win = v_pad[:, :, i:i+2*w+1, :]
+            scores = torch.matmul(q[:, :, i:i+1, :], k_win.transpose(-2, -1)) / (D ** 0.5)
+            attn = F.softmax(scores, dim=-1)
+            out[:, :, i, :] = torch.matmul(attn, v_win).squeeze(2)
+
+        return out
 
 
 class _Expert(nn.Module):
