@@ -92,7 +92,7 @@ def get_config() -> ExperimentConfig:
     )
 
     config.wandb = WandbConfig(
-        project="wsi-classification-test",
+        project="camely-sparse",
         job_group="camely_vanilla_transformer",
     )
 
