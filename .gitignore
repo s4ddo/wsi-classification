@@ -7,14 +7,13 @@ student_debugging_dataset
 student_debugging_dataset_reduced_256dim
 runs/
 *.zip
-*.csv
 *.md
-
+transmil_baseline/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
-
+Datasets/
 # C extensions
 *.so
 
