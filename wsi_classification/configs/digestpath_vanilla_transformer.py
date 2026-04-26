@@ -20,17 +20,18 @@ VAL_CSV = "Datasets/DigestPath_val.csv"
 FEATURES_DIR = "Datasets/DigestPath_UNI_features"
 
 # ─── Hyperparameters ─────────────────────────────────────────────
-BATCH_SIZE = 1  # Standard for MIL bags
-NUM_WORKERS = 2  # No multiprocessing for single batch testing
-IN_FEATURES = 1024  # UNI embeddings are 1024-dim
-OUT_FEATURES = 1  # Binary task
-HIDDEN_DIM = 256
+BATCH_SIZE = 1  # MIL bags have variable sequence lengths — keep at 1
+NUM_WORKERS = 4
+IN_FEATURES = 1024  # UNI embeddings
+OUT_FEATURES = 1  # Binary task via BCEWithLogitsLoss (cancerous vs non-cancerous)
+DIM = 256
+HIDDEN_DIM = 1024
 NUM_HEADS = 8
-NUM_LAYERS = 2
+DEPTH = 4
 PRECISION = "bf16-mixed"
 
-TRAINING_ITERATIONS = 3_000  # Test with enough iterations for scheduler
-WARMUP_ITERATIONS_PERCENTAGE = 0.0  # No warmup for quick test
+TRAINING_ITERATIONS = 3_000
+WARMUP_ITERATIONS_PERCENTAGE = 0.05
 LEARNING_RATE = 2e-4
 WEIGHT_DECAY = 1e-4
 GRAD_CLIP = 1.0
@@ -55,10 +56,11 @@ def get_config() -> ExperimentConfig:
     # Network: Vanilla Transformer
     config.net = LazyConfig(VanillaTransformer)(
         in_features=IN_FEATURES,
-        hidden_dim=HIDDEN_DIM,
-        num_heads=NUM_HEADS,
-        num_layers=NUM_LAYERS,
         out_features=OUT_FEATURES,
+        dim=DIM,
+        depth=DEPTH,
+        num_heads=NUM_HEADS,
+        hidden_dim=HIDDEN_DIM,
     )
 
     # Lightning wrapper
@@ -88,10 +90,9 @@ def get_config() -> ExperimentConfig:
         mode="max",
     )
 
-    # W&B Logging (will run offline in debug mode)
     config.wandb = WandbConfig(
-        project="wsi-classification-test",
-        job_group="vanilla_transformer_test",
+        project="latentvsvanilla",
+        job_group="digestpath_vanilla_transformer",
     )
 
     return config

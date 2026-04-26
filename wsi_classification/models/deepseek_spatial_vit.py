@@ -118,6 +118,7 @@ class DeepSeekSpatialViT(nn.Module):
         dim: Internal hidden dimension of the transformer.
         depth: Number of ViT blocks.
         num_heads: Number of attention heads (must divide ``dim``).
+        hidden_dim: Hidden dimension for the MoE expert networks.
         latent_dim: Bottleneck size for the Multi-Head Latent Attention K/V projection.
         num_shared: Number of always-active shared experts in each MoE layer.
         num_routed: Total number of routed experts in each MoE layer.
@@ -131,6 +132,7 @@ class DeepSeekSpatialViT(nn.Module):
         dim: int = 128,
         depth: int = 4,
         num_heads: int = 4,
+        hidden_dim: int = 256,
         latent_dim: int = 64,
         num_shared: int = 1,
         num_routed: int = 4,
@@ -145,7 +147,7 @@ class DeepSeekSpatialViT(nn.Module):
         self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
 
         self.blocks = nn.ModuleList([
-            _ViTBlock(dim, num_heads, latent_dim, num_shared, num_routed, top_k, dim * 2)
+            _ViTBlock(dim, num_heads, latent_dim, num_shared, num_routed, top_k, hidden_dim)
             for _ in range(depth)
         ])
 

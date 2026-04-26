@@ -18,17 +18,25 @@ VAL_CSV   = "Datasets/DigestPath_val.csv"
 FEATURES_DIR = "Datasets/DigestPath_UNI_features"
 
 # ─── Hyperparameters ─────────────────────────────────────────────
-BATCH_SIZE  = 1       # MIL bags have variable sequence lengths — keep at 1
+BATCH_SIZE = 1  # MIL bags have variable sequence lengths — keep at 1
 NUM_WORKERS = 4
-IN_FEATURES = 1024    # UNI embeddings
-OUT_FEATURES = 2      # Binary task via CrossEntropyLoss (cancerous vs non-cancerous)
-PRECISION   = "bf16-mixed"
+IN_FEATURES = 1024  # UNI embeddings
+OUT_FEATURES = 1  # Binary task via BCEWithLogitsLoss (cancerous vs non-cancerous)
+DIM = 256
+DEPTH = 4
+NUM_HEADS = 8
+HIDDEN_DIM = 512
+LATENT_DIM = 64
+NUM_SHARED = 1
+NUM_ROUTED = 4
+TOP_K = 2
+PRECISION = "bf16-mixed"
 
-TRAINING_ITERATIONS         = 3_000
+TRAINING_ITERATIONS = 3_000
 WARMUP_ITERATIONS_PERCENTAGE = 0.05
-LEARNING_RATE  = 1e-4
-WEIGHT_DECAY   = 1e-4
-GRAD_CLIP      = 1.0
+LEARNING_RATE = 2e-4
+WEIGHT_DECAY = 1e-4
+GRAD_CLIP = 1.0
 
 
 def get_config() -> ExperimentConfig:
@@ -49,17 +57,18 @@ def get_config() -> ExperimentConfig:
     config.net = LazyConfig(DeepSeekSpatialViT)(
         in_features=IN_FEATURES,
         out_features=OUT_FEATURES,
-        dim=128,
-        depth=4,
-        num_heads=4,
-        latent_dim=64,
-        num_shared=1,
-        num_routed=4,
-        top_k=2,
+        dim=DIM,
+        depth=DEPTH,
+        num_heads=NUM_HEADS,
+        hidden_dim=HIDDEN_DIM,
+        latent_dim=LATENT_DIM,
+        num_shared=NUM_SHARED,
+        num_routed=NUM_ROUTED,
+        top_k=TOP_K,
     )
 
     config.lightning_wrapper_class = LazyConfig(SpatialMILWrapper)(
-        use_bce_loss=False,   # CrossEntropyLoss for 2-class output
+        use_bce_loss=True,    # BCEWithLogitsLoss for binary output
     )
 
     config.optimizer = LazyConfig(torch.optim.AdamW)(
@@ -82,7 +91,7 @@ def get_config() -> ExperimentConfig:
     )
 
     config.wandb = WandbConfig(
-        project="wsi-classification-test",
+        project="latentvsvanilla",
         job_group="digestpath_deepseek_spatial_vit",
     )
 
