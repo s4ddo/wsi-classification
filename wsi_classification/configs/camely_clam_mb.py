@@ -17,6 +17,7 @@ from wsi_classification.experiments.datamodules.h5_datamodule import H5FeatureBa
 # ─── Dataset ───────────────────────────────────────────────────
 TRAIN_CSV = "splits/camely_train.csv"
 VAL_CSV = "splits/camely_val.csv"
+TEST_CSV = "splits/camely_test.csv"
 FEATURES_DIR = "/workspace/data/h5_features"
 
 # ─── Model Hyperparameters ────────────────────────────────────
@@ -43,12 +44,13 @@ def get_config() -> ExperimentConfig:
     config = ExperimentConfig()
     config.debug = False
     config.seed = 42
-    config.test.do = False  # Skip test phase (no test dataset)
+    config.test.do = True
 
     # Dataset module
     config.dataset = LazyConfig(H5FeatureBagDataModule)(
         train_csv=TRAIN_CSV,
         val_csv=VAL_CSV,
+        test_csv=TEST_CSV,
         features_dir=FEATURES_DIR,
         label_col_name="label",
         batch_size=BATCH_SIZE,
