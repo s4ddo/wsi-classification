@@ -278,3 +278,12 @@ class ClassificationWrapper(LightningWrapperBase):
     def binary_prediction(logits):
         """Predict the class with the highest logit for binary classification."""
         return (logits > 0.0).squeeze().long()
+
+    def test_step(self, batch, batch_idx):
+        """Perform a test step and log predictions."""
+        # Perform step (no accuracy tracking for test)
+        predictions, loss, other_outputs = self._step(batch, self.val_acc)
+        # Log test loss
+        self.log("test/loss", loss, sync_dist=self.distributed)
+        # Return loss
+        return loss

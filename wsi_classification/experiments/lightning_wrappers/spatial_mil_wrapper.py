@@ -32,3 +32,39 @@ class SpatialMILWrapper(MILWrapper):
 
         accuracy_calculator.update(preds, labels)
         return loss, preds, {"logits": logits}
+
+    def test_step(self, batch: dict, batch_idx: int) -> None:
+        """Perform one test step with spatial coordinates.
+
+        Args:
+            batch: Dict with ``"input"``, ``"label"``, ``"coords"``, and ``"slide_name"``.
+            batch_idx: Index of the current batch (unused).
+        """
+        inputs = batch["input"]
+        labels = batch["label"]
+        slide_names = batch["slide_name"]
+
+        coords = batch.get("coords")
+        if isinstance(coords, list):
+            coords = torch.stack(coords, dim=0)
+
+        output_dict = self.network(inputs, coords)
+        logits = output_dict["logits"].squeeze(1)
+
+        if not self.multiclass and self.use_bce_loss:
+            preds = (torch.sigmoid(logits) >= 0.5).int()
+            probs = torch.sigmoid(logits)
+        else:
+            preds = torch.argmax(logits, dim=-1)
+            probs = torch.softmax(logits, dim=-1)
+
+        # Log predictions per slide
+        for slide_name, pred, prob, label in zip(slide_names, preds, probs, labels):
+            self.log_dict(
+                {
+                    f"test/pred_{slide_name}": pred.item(),
+                    f"test/prob_{slide_name}": prob.max().item() if isinstance(prob, torch.Tensor) else prob,
+                    f"test/label_{slide_name}": label.item(),
+                },
+                sync_dist=True,
+            )
