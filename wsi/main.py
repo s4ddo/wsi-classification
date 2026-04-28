@@ -96,7 +96,7 @@ if __name__ == "__main__":
     parser.add_argument("--mode", type=str, default="vanilla",
                         choices=["vanilla", "windowed", "nsa", "adventurer", "probe"])
     # General hyperparameters
-    parser.add_argument("--lr", type=float, default=1e-5)
+    parser.add_argument("--lr", type=float, default=5e-5)
     parser.add_argument("--weight_decay", type=float, default=1e-6)
     parser.add_argument("--input_dim", type=int, default=1024)  # TODO: change for final datasets
     parser.add_argument("--num_classes", type=int, default=2)
@@ -146,8 +146,18 @@ if __name__ == "__main__":
     # train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
 
     # IMPORTANT: batch_size is set to 1 to handle variable sequence lengths (N) # TODO: create padding
-    train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True, num_workers=7)
-    test_loader = DataLoader(val_dataset, batch_size=1, shuffle=False, num_workers=7)
+    train_loader = DataLoader(train_dataset,
+                              batch_size=1,
+                              shuffle=True,
+                              num_workers=7,
+                              persistent_workers=True,
+                              )
+    test_loader = DataLoader(val_dataset,
+                             batch_size=1,
+                             shuffle=False,
+                             num_workers=7,
+                             persistent_workers=True
+                             )
 
 
     # --- Run model ---
