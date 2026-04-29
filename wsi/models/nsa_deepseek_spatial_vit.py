@@ -55,6 +55,8 @@ class NativeSparseMLA(nn.Module):
                 "fine_attn_backend='flex' needs PyTorch >= 2.5 with "
                 "torch.nn.attention.flex_attention available."
             )
+        assert dim % num_heads == 0, "dim must be divisible by num_heads"
+        self.fine_attn_backend = fine_attn_backend
 
         self.dim = dim
         self.num_heads = num_heads

@@ -14,6 +14,7 @@ from wsi.models.window_deepseek_spatial_vit import WinDeepSeekSpatialViT
 from wsi.models.adventurer import Adventurer
 from wsi.models.nsa_deepseek_spatial_vit import NSADeepSeekSpatialViT
 from wsi.models.linear_probe import LinearProbe
+from wsi.models.deformable_detr import DeformableViT
 
 
 class GeneralModelPL(pl.LightningModule):
@@ -38,6 +39,8 @@ class GeneralModelPL(pl.LightningModule):
             self.model = NSADeepSeekSpatialViT(**kwargs)
         elif mode == "probe":   # Linear probe
             self.model = LinearProbe(**kwargs)
+        elif mode == "defr":
+            self.model = DeformableViT(**kwargs)
 
     def forward(self, x, coords):
         if self.degrade_embeds_rate > 0.01:
@@ -94,7 +97,7 @@ if __name__ == "__main__":
                         help="Pass specific device indices, e.g., --devices 0 1")
     parser.add_argument("--degrade_embeds_rate", type=float, default=0.0)
     parser.add_argument("--mode", type=str, default="vanilla",
-                        choices=["vanilla", "windowed", "nsa", "adventurer", "probe"])
+                        choices=["vanilla", "windowed", "nsa", "adventurer", "probe", "defr"])
     # General hyperparameters
     parser.add_argument("--lr", type=float, default=5e-5)
     parser.add_argument("--weight_decay", type=float, default=1e-6)

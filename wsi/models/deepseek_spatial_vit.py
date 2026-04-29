@@ -10,6 +10,7 @@ from wsi.models.pos_embeds import SpatialEncoding, RotaryEmbedding
 class SimplifiedMLA(nn.Module):
     def __init__(self, dim, num_heads, latent_dim, use_rope=False):
         super().__init__()
+        assert dim % num_heads == 0, "dim must be divisible by num_heads"
         self.use_rope = use_rope
 
         self.num_heads = num_heads
