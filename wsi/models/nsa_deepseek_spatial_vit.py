@@ -42,7 +42,7 @@ class NativeSparseMLA(nn.Module):
         num_heads,
         latent_dim,
         block_size=16,
-        window_size=64,
+        window_size_nsa=64,
         top_k=4,
         fine_attn_backend="gather",  # "gather" | "flex"
         use_rope=True,
@@ -63,7 +63,7 @@ class NativeSparseMLA(nn.Module):
         self.head_dim = dim // num_heads
         self.latent_dim = latent_dim
         self.block_size = block_size
-        self.window_size = window_size
+        self.window_size = window_size_nsa
         self.top_k = top_k
         self.use_rope = use_rope
 
@@ -255,7 +255,7 @@ class NativeSparseMLA(nn.Module):
 class NSATransBlock(nn.Module):
     def __init__(
         self, dim, num_heads, latent_dim, num_shared, num_routed, top_k_moe,
-        mlp_hidden_dim, block_size, window_size, top_k_nsa, fine_attn_backend="gather",
+        mlp_hidden_dim, block_size, window_size_nsa, top_k_nsa, fine_attn_backend="gather",
     ):
         super().__init__()
         self.norm1 = nn.LayerNorm(dim)
@@ -263,7 +263,7 @@ class NSATransBlock(nn.Module):
                                      num_heads,
                                      latent_dim,
                                      block_size,
-                                     window_size,
+                                     window_size_nsa,
                                      top_k_nsa,
                                      fine_attn_backend=fine_attn_backend)
 
@@ -280,7 +280,7 @@ class NSADeepSeekSpatialViT(nn.Module):
     def __init__(
         self, input_dim, num_classes=2, dim=128, depth=4, num_heads=4,
         latent_dim=64, num_shared=1, num_routed=4, top_k_moe=2,
-        block_size=16, window_size=64, top_k_nsa=4,
+        block_size=16, window_size_nsa=64, top_k_nsa=4,
         fine_attn_backend: str = "gather",
         **kwargs,
     ):
@@ -293,7 +293,7 @@ class NSADeepSeekSpatialViT(nn.Module):
         self.blocks = nn.ModuleList([
             NSATransBlock(
                 dim, num_heads, latent_dim, num_shared, num_routed, top_k_moe,
-                dim * 2, block_size, window_size, top_k_nsa,
+                dim * 2, block_size, window_size_nsa, top_k_nsa,
                 fine_attn_backend=fine_attn_backend,
             )
             for _ in range(depth)
