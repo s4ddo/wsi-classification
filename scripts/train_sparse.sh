@@ -2,12 +2,12 @@
 
 for seed in 123; do
     python -m wsi.main \
-        --train_csv "/Volumes/Samsung PSSD T7 Media/camelyon/splits/camelyon_seed${seed}_train.csv" \
-        --val_csv   "/Volumes/Samsung PSSD T7 Media/camelyon/splits/camelyon_seed${seed}_val.csv" \
-        --features_dir /Volumes/Samsung\ PSSD\ T7\ Media/camelyon/h5_features/ \
+        --train_csv "/workspace/data/camelyon/splits/camelyon_seed${seed}_train.csv" \
+        --val_csv   "/workspace/data/camelyon/splits/camelyon_seed${seed}_val.csv" \
+        --features_dir /workspace/data/camelyon/h5_features/ \
         --seed $seed \
-        --epochs 20 \
-        --accelerator mps \
+        --epochs 10 \
+        --accelerator cuda \
         --devices 0 \
         --grad_accum 4 \
         --val_check_interval 200 \
