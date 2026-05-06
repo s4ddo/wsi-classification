@@ -1,5 +1,6 @@
 ##### REPO Ignores:
 .vscode
+.idea/
 data/v1_outputs_aumc
 data/extracted_tiles/.
 
@@ -174,3 +175,8 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# large files
+/data
+/wsi/lightning_logs
+/lightning_logs

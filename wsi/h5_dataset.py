@@ -87,24 +87,29 @@ class H5FeatureBagDataset(Dataset):
                 - ``"coords"`` (torch.Tensor): Patch coordinates, shape (N, 2), float32.
         """
         item = self.slides[idx]
-        h5_path = item["h5_path"]
-        
-        with h5py.File(h5_path, "r") as f:
-            features = f["features"][:] # shape: (N_patches, 1280)
-            coords = f["coords"][:]     # shape: (N_patches, 2)
-            
+
+        with h5py.File(item["h5_path"], "r") as f:
+            feature_key = next(
+                (k for k in ["features", "embeddings", "imgs", "feat", "data"] if k in f),
+                None
+            )
+            if feature_key is None:
+                feature_key = next(k for k in f.keys() if k not in ("coords", "coordinates"))
+
+            coord_key = "coordinates" if "coordinates" in f else "coords"
+
+            features = f[feature_key][:]
+            coords = f[coord_key][:]
+
         features_t = torch.from_numpy(features).float()
         coords_t = torch.from_numpy(coords).float()
-        
-        label = item["label"]
 
         if self.transform is not None:
             features_t = self.transform(features_t)
-        
-        # Note: MIL models generally expect shape (N, feature_dim).
+
         return {
-            "input": features_t, 
-            "label": torch.tensor(label, dtype=torch.long), 
-            "slide_name": item["slide_name"], 
-            "coords": coords_t
+            "input": features_t,
+            "label": torch.tensor(item["label"], dtype=torch.long),
+            "slide_name": item["slide_name"],
+            "coords": coords_t,
         }

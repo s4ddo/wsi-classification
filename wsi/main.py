@@ -1,276 +1,392 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.utils.data import DataLoader, random_split
 import time
+import torch
+import argparse
+import io
+import numpy as np
+import torch.nn.functional as F
+import pytorch_lightning as pl
+from PIL import Image
+import matplotlib.pyplot as plt
+import matplotlib
 
-# Import the custom dataset class from your provided file
-from h5_dataset import H5FeatureBagDataset
+matplotlib.use("Agg")
 
-# 1. Multi-Head Latent Attention & MoE Blocks 
-class SimplifiedMLA(nn.Module):
-    def __init__(self, dim, num_heads, latent_dim):
+from torch.utils.data import DataLoader
+from pytorch_lightning.loggers import TensorBoardLogger
+from pytorch_lightning.callbacks import (
+    DeviceStatsMonitor,
+    RichProgressBar,
+    ModelCheckpoint,
+    LearningRateMonitor,
+)
+from torchmetrics.classification import BinaryAUROC, BinaryF1Score, BinaryConfusionMatrix
+
+from wsi.h5_dataset import H5FeatureBagDataset
+from wsi.utils import apply_embedding_dropout
+from wsi.models.deepseek_spatial_vit import DeepSeekSpatialViT
+from wsi.models.window_deepseek_spatial_vit import WinDeepSeekSpatialViT
+from wsi.models.adventurer import Adventurer
+from wsi.models.nsa_deepseek_spatial_vit import NSADeepSeekSpatialViT
+from wsi.models.linear_probe import LinearProbe
+from wsi.models.deformable_detr import DeformableViT
+
+
+class GeneralModelPL(pl.LightningModule):
+    def __init__(self, mode="vanilla", lr=1e-4, weight_decay=1e-6, degrade_embeds_rate=0.0, warmup=3, **kwargs):
         super().__init__()
-        self.num_heads = num_heads
-        self.head_dim = dim // num_heads
-        
-        self.q_proj = nn.Linear(dim, dim)
-        self.kv_down = nn.Linear(dim, latent_dim) 
-        self.kv_up = nn.Linear(latent_dim, dim * 2) 
-        self.out_proj = nn.Linear(dim, dim)
+        self.save_hyperparameters()
+        self.mode = mode
+        self.lr = lr
+        self.weight_decay = weight_decay
+        self.degrade_embeds_rate = degrade_embeds_rate
+        self.warmup_epochs = warmup
 
-    def forward(self, x):
-        B, N, C = x.shape
-        q = self.q_proj(x).reshape(B, N, self.num_heads, self.head_dim).transpose(1, 2)
-        
-        kv_latent = self.kv_down(x)
-        kv = self.kv_up(kv_latent)
-        k, v = kv.chunk(2, dim=-1)
-        
-        k = k.reshape(B, N, self.num_heads, self.head_dim).transpose(1, 2)
-        v = v.reshape(B, N, self.num_heads, self.head_dim).transpose(1, 2)
-        
-        out = F.scaled_dot_product_attention(q, k, v)
-        
-        out = out.transpose(1, 2).reshape(B, N, C)
-        return self.out_proj(out)
+        if mode == "vanilla":   # Full attention
+            # input_dim, num_classes, dim, depth, num_heads, latent_dim, num_shared, num_routed, top_k
+            self.model = DeepSeekSpatialViT(**kwargs)
+        elif mode == "windowed":    # Local-Global windowed attention
+            # input_dim, num_classes, dim, depth, num_heads, latent_dim, num_shared, num_routed, top_k, window_size
+            self.model = WinDeepSeekSpatialViT(**kwargs)
+        elif mode == "adventurer":  # Mamba SSM token mixing
+            # input_dim, num_classes, dim, depth
+            self.model = Adventurer(**kwargs)
+        elif mode == "nsa": # Native Sparse Attention
+            self.model = NSADeepSeekSpatialViT(**kwargs)
+        elif mode == "probe":   # Linear probe
+            self.model = LinearProbe(**kwargs)
+        elif mode == "defr":
+            self.model = DeformableViT(**kwargs)
 
-class Expert(nn.Module):
-    def __init__(self, dim, hidden_dim):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(dim, hidden_dim),
-            nn.GELU(),
-            nn.Linear(hidden_dim, dim)
-        )
-    def forward(self, x): 
-        return self.net(x)
+        self.val_auroc = BinaryAUROC()
+        self.val_f1 = BinaryF1Score()
+        self.val_cm = BinaryConfusionMatrix()
 
-class DeepSeekMoE(nn.Module):
-    def __init__(self, dim, num_shared, num_routed, top_k, hidden_dim):
-        super().__init__()
-        self.top_k = top_k
-        self.shared_experts = nn.ModuleList([Expert(dim, hidden_dim) for _ in range(num_shared)])
-        self.routed_experts = nn.ModuleList([Expert(dim, hidden_dim) for _ in range(num_routed)])
-        self.router = nn.Linear(dim, num_routed, bias=False)
+        self._train_seq_lens = []
 
-    def forward(self, x):
-        B, N, C = x.shape
-        x_flat = x.view(-1, C)
-        
-        shared_out = sum(expert(x_flat) for expert in self.shared_experts)
-        route_logits = self.router(x_flat)
-        route_probs = F.softmax(route_logits, dim=-1)
-        topk_probs, topk_indices = torch.topk(route_probs, self.top_k, dim=-1)
-        
-        routed_out = torch.zeros_like(x_flat)
-        
-        for i, expert in enumerate(self.routed_experts):
-            mask = (topk_indices == i)
-            if mask.any():
-                idx_tokens, idx_k = torch.where(mask)
-                expert_in = x_flat[idx_tokens]
-                expert_out = expert(expert_in) * topk_probs[idx_tokens, idx_k].unsqueeze(-1)
-                routed_out.index_add_(0, idx_tokens, expert_out)
-                
-        out = shared_out + routed_out
-        return out.view(B, N, C)
-
-class ViTBlock(nn.Module):
-    def __init__(self, dim, num_heads, latent_dim, num_shared, num_routed, top_k, hidden_dim):
-        super().__init__()
-        self.norm1 = nn.LayerNorm(dim)
-        self.attn = SimplifiedMLA(dim, num_heads, latent_dim)
-        
-        self.norm2 = nn.LayerNorm(dim)
-        self.moe = DeepSeekMoE(dim, num_shared, num_routed, top_k, hidden_dim)
-
-    def forward(self, x):
-        x = x + self.attn(self.norm1(x))
-        x = x + self.moe(self.norm2(x))
-        return x
-
-# 2. Spatially-Aware MIL Transformer Architecture
-class SpatialEncoding(nn.Module):
-    """Projects 2D coordinates (X, Y) into the transformer's hidden dimension."""
-    def __init__(self, dim):
-        super().__init__()
-        self.proj = nn.Sequential(
-            nn.Linear(2, dim // 2),
-            nn.GELU(),
-            nn.Linear(dim // 2, dim)
-        )
-
-    def forward(self, coords):
-        # Scale down coordinates to prevent massive values from overwhelming the network
-        # (Assuming typical WSI coordinates are in the tens of thousands of pixels)
-        normalized_coords = coords / 10000.0 
-        return self.proj(normalized_coords)
-
-class DeepSeekSpatialViT(nn.Module):
-    def __init__(self, input_dim=1280, num_classes=2, dim=128, depth=4, 
-                 num_heads=4, latent_dim=64, num_shared=1, num_routed=4, top_k=2):
-        super().__init__()
-        
-        self.feature_proj = nn.Linear(input_dim, dim)
-        self.pos_embed = SpatialEncoding(dim) # Dynamic positional embedding generator
-        self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
-
-        self.blocks = nn.ModuleList([
-            ViTBlock(dim, num_heads, latent_dim, num_shared, num_routed, top_k, dim * 2)
-            for _ in range(depth)
-        ])
-        
-        self.norm = nn.LayerNorm(dim)
-        self.head = nn.Linear(dim, num_classes)
 
     def forward(self, x, coords):
-        """
-        Args:
-            x (torch.Tensor): Feature bags of shape [B, N, Input_Dim]
-            coords (torch.Tensor): Coordinates of shape [B, N, 2]
-        """
-        B, N, _ = x.shape
-        
-        # 1. Project 1280D image features to hidden dimension
-        x = self.feature_proj(x) # -> [B, N, dim]
-        
-        # 2. Generate and add spatial positional embeddings
-        spatial_tokens = self.pos_embed(coords)
-        x = x + spatial_tokens 
-        
-        # 3. Prepend CLS token for classification
-        cls_tokens = self.cls_token.expand(B, -1, -1)
-        x = torch.cat((cls_tokens, x), dim=1) # -> [B, N+1, dim]
+        if self.degrade_embeds_rate > 0.01:
+            x = apply_embedding_dropout(x, self.degrade_embeds_rate)
+        return self.model(x, coords)
 
-        # Pass through Transformer blocks
-        for block in self.blocks:
-            x = block(x)
+    def training_step(self, batch, batch_idx):
+        inputs, coords, labels = batch["input"], batch["coords"], batch["label"]
 
-        x = self.norm(x)
-        
-        # Classification using only the CLS token output
-        return self.head(x[:, 0])
+        seq_len = inputs.shape[1]
+        self._train_seq_lens.append(seq_len)
+        self.log("train/seq_len", float(seq_len), prog_bar=False, on_step=True, on_epoch=False)
 
-# 3. Training & Evaluation Loops
-def train(trainloader, input_dim, num_classes):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Training on {device}...")
+        logits = self(inputs, coords)
+        loss = F.cross_entropy(logits, labels)
 
-    # Initialize the spatially-aware MIL model
-    model = DeepSeekSpatialViT(input_dim=input_dim, num_classes=num_classes).to(device)
-    criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-4)
+        self.log("train/loss", loss, prog_bar=True)
+        return loss
 
-    epochs = 10
-    for epoch in range(epochs):
-        model.train()
-        running_loss = 0.0
-        start_time = time.time()
-        
-        for i, batch in enumerate(trainloader):
-            # Extract features, coordinates, and labels
-            inputs = batch["input"].to(device)
-            coords = batch["coords"].to(device)
-            labels = batch["label"].to(device)
+    def on_train_epoch_end(self):
+        if self._train_seq_lens:
+            lens = np.array(self._train_seq_lens)
+            self.log_dict({
+                "train/seq_len_max": float(lens.max()),
+                "train/seq_len_min": float(lens.min()),
+                "train/seq_len_mean": float(lens.mean()),
+            })
+        self._train_seq_lens = []
 
-            optimizer.zero_grad()
-            
-            # Pass BOTH features and coordinates to the model
-            outputs = model(inputs, coords)
-            
-            loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
 
-            running_loss += loss.item()
-            
-            # Print stats every 10 steps (since batch size is 1)
-            if i % 10 == 9:
-                print(f"Epoch [{epoch + 1}/{epochs}], Step [{i + 1}/{len(trainloader)}], Loss: {running_loss / 10:.4f}")
-                running_loss = 0.0
-                
-        print(f"Epoch {epoch+1} completed in {time.time() - start_time:.2f} seconds.")
+    def validation_step(self, batch, batch_idx):
+        inputs, coords, labels = batch["input"], batch["coords"], batch["label"]
+        logits = self(inputs, coords)
+        loss = F.cross_entropy(logits, labels)
 
-    print("Finished Training!")
-    return model, device
+        preds = torch.argmax(logits, dim=1)
+        probs_pos = torch.softmax(logits, dim=1)[:, 1]
 
-def test(model, testloader, device):
-    print("Evaluating on test set...")
-    model.eval() 
-    
-    correct = 0
-    total = 0
-    
-    with torch.no_grad():
-        for batch in testloader:
-            inputs = batch["input"].to(device)
-            coords = batch["coords"].to(device)
-            labels = batch["label"].to(device)
-            
-            outputs = model(inputs, coords)
-            _, predicted = torch.max(outputs.data, 1)
-            
-            total += labels.size(0)
-            correct += (predicted == labels).sum().item()
+        self.val_auroc.update(probs_pos, labels)
+        self.val_f1.update(preds, labels)
+        self.val_cm.update(preds, labels)
 
-    if total > 0:
-        accuracy = 100 * correct / total
-        print(f'Accuracy of the network on the test dataset: {accuracy:.2f}%')
-    else:
-        print("No samples in test set.")
+        acc = (preds == labels).float().mean()
 
-# 4. Main Execution Setup
+        self.log_dict({
+            "val/loss": loss,
+            "val/acc": acc,
+        }, prog_bar=True, on_epoch=True)
+
+    def on_validation_epoch_end(self):
+        auroc = self.val_auroc.compute()
+        f1 = self.val_f1.compute()
+        cm = self.val_cm.compute()
+
+        self.log_dict({
+            "val/auroc": auroc,
+            "val/f1": f1,
+        }, prog_bar=True)
+
+        fig = self._make_cm_figure(cm)
+        if self.logger and hasattr(self.logger.experiment, "add_figure"):
+            self.logger.experiment.add_figure(
+                "val/confusion_matrix", fig, global_step=self.current_epoch
+            )
+        plt.close(fig)
+
+        self.val_auroc.reset()
+        self.val_f1.reset()
+        self.val_cm.reset()
+
+    def configure_optimizers(self):
+        # Separate weight decay: do NOT apply it to biases and LayerNorm params
+        decay_params = []
+        no_decay_params = []
+        for name, param in self.named_parameters():
+            if not param.requires_grad:
+                continue
+            if param.ndim <= 1 or name.endswith(".bias"):
+                # LayerNorm weights are 1-D, biases are also excluded
+                no_decay_params.append(param)
+            else:
+                decay_params.append(param)
+
+        param_groups = [
+            {"params": decay_params, "weight_decay": self.weight_decay},
+            {"params": no_decay_params, "weight_decay": 0.0},
+        ]
+
+        optimizer = torch.optim.AdamW(param_groups, lr=self.lr)
+
+        # Linear warmup is important with batch_size=1 and large models
+        def lr_lambda(epoch):
+            if epoch < self.warmup_epochs:
+                return (epoch + 1) / self.warmup_epochs
+            return 1.0
+
+        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
+
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "epoch",
+                "frequency": 1,
+            },
+        }
+
+    @staticmethod
+    def _make_cm_figure(cm: torch.Tensor) -> plt.Figure:
+        cm_np = cm.cpu().numpy()
+        fig, ax = plt.subplots(figsize=(4, 4))
+        im = ax.imshow(cm_np, interpolation="nearest", cmap="Blues")
+        plt.colorbar(im, ax=ax)
+        classes = ["Normal", "Tumor"]
+        tick_marks = [0, 1]
+        ax.set_xticks(tick_marks)
+        ax.set_yticks(tick_marks)
+        ax.set_xticklabels(classes)
+        ax.set_yticklabels(classes)
+        ax.set_ylabel("True label")
+        ax.set_xlabel("Predicted label")
+        ax.set_title("Confusion Matrix")
+        thresh = cm_np.max() / 2.0
+        for i in range(cm_np.shape[0]):
+            for j in range(cm_np.shape[1]):
+                ax.text(j, i, str(int(cm_np[i, j])),
+                        ha="center", va="center",
+                        color="white" if cm_np[i, j] > thresh else "black")
+        fig.tight_layout()
+        return fig
+
+
+class ElapsedTimer(pl.Callback):
+    """Log wall-clock time per epoch. Useful for estimating remaining compute cost."""
+
+    def __init__(self):
+        self.epoch_start_time = None
+
+    def on_train_epoch_start(self, trainer, pl_module):
+        self.epoch_start_time = time.time()
+
+    def on_train_epoch_end(self, trainer, pl_module):
+        elapsed = time.time() - self.epoch_start_time
+        pl_module.log("perf/epoch_duration_seconds", elapsed)
+        n_slides = len(trainer.train_dataloader.dataset)
+        pl_module.log("perf/slides_per_second", n_slides / elapsed)
+
+
+class GradientNormLogger(pl.Callback):
+    """Log gradient norm per step."""
+    def on_after_backward(self, trainer, pl_module):
+        total_norm = 0.0
+        for p in pl_module.parameters():
+            if p.grad is not None:
+                total_norm += p.grad.detach().norm(2).item() ** 2
+        total_norm = total_norm ** 0.5
+        pl_module.log("train/grad_norm", total_norm, on_step=True, on_epoch=False)
+
+
+
 if __name__ == "__main__":
-    csv_path = "/home/tapotheker/dp2/data/combined_tcga_amc.csv"
-    features_dir = "/home/tapotheker/dp2/data"
+    # --- Argument Parsing ---
+    parser = argparse.ArgumentParser()
 
-    print("Initializing Dataset...")
-    dataset = H5FeatureBagDataset(
-        csv_path=csv_path,
+    # Paths
+    parser.add_argument("--train_csv", type=str, default=None,
+                        help="Path to train csv.")
+    parser.add_argument("--val_csv", type=str, default=None,
+                        help="Path to val csv.")
+    parser.add_argument("--features_dir", type=str, default=None,
+                        help="Path to feature dir.")
+
+    # Run control
+    parser.add_argument("--seed", type=int, default=123,
+                        help="Global random seed.")
+    parser.add_argument("--epochs", type=int, default=20)
+    parser.add_argument("--warmup", type=int, default=3)
+    parser.add_argument("--val_check_interval", type=int, default=200,
+                        help="Validate every N training steps.")
+    parser.add_argument("--accelerator", type=str, default=None,
+                        help="Pass specific accelerator to pytorch-lightning, e.g., --accelerator 'gpu'.")
+    parser.add_argument("--devices", type=int, nargs="+", default=None,
+                        help="Pass specific device indices, e.g., --devices 0 1.")
+    parser.add_argument("--degrade_embeds_rate", type=float, default=0.0)
+    parser.add_argument("--grad_accum", type=int, default=4,
+                        help="Gradient accumulation steps. Effective batch = grad_accum * 1.")
+    # Model selection
+    parser.add_argument("--mode", type=str, default="vanilla",
+                        choices=["vanilla", "windowed", "nsa", "adventurer", "probe", "defr"])
+
+    # General hyperparameters
+    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--weight_decay", type=float, default=0.05)
+    parser.add_argument("--input_dim", type=int, default=1280)
+    parser.add_argument("--num_classes", type=int, default=2)
+    parser.add_argument("--dim", type=int, default=320)
+    parser.add_argument("--depth", type=int, default=6)
+
+    # Expert/MoE hyperparameters (shared by DeepSeek inspired models)
+    group_moe = parser.add_argument_group('MoE Settings')
+    group_moe.add_argument("--num_heads", type=int, default=8)
+    group_moe.add_argument("--latent_dim", type=int, default=64)
+    group_moe.add_argument("--num_shared", type=int, default=2)
+    group_moe.add_argument("--num_routed", type=int, default=8)
+    group_moe.add_argument("--top_k", type=int, default=2)
+
+    # Special hyperparameters
+    # Windowed Deepseek hyperparameters
+    parser.add_argument("--window_size", type=int, default=33)
+
+    # Adventurer hyperparameters
+    parser.add_argument("--mamba_d_state", type=int, default=128)
+    parser.add_argument("--mamba_expand", type=int, default=4)
+    parser.add_argument("--mamba_headdim", type=int, default=64)
+
+    # NSA hyperparameters
+    parser.add_argument("--top_k_nsa", type=int, default=8)
+    parser.add_argument("--block_size", type=int, default=64)
+    parser.add_argument("--window_size_nsa", type=int, default=1024)
+    parser.add_argument("--fine_attn_backend", type=str, default="gather", choices=["gather", "flex"])
+
+    args = parser.parse_args()
+    args_dict = vars(args)
+
+
+    # --- Setup data ---
+    pl.seed_everything(args.seed, workers=True)
+
+    train_csv_path = args_dict.pop("train_csv")
+    val_csv_path   = args_dict.pop("val_csv")
+    features_dir   = args_dict.pop("features_dir")
+
+    train_dataset = H5FeatureBagDataset(
+        csv_path=train_csv_path,
         features_dir=features_dir,
-        label_col_name="tmb_combined"
+        label_col_name="label"
+    )
+    val_dataset = H5FeatureBagDataset(
+        csv_path=val_csv_path,
+        features_dir=features_dir,
+        label_col_name="label"
     )
 
-    if len(dataset) == 0:
-        print("No valid data found. Check your paths and CSV file.")
-        exit()
+    if len(train_dataset) == 0 or len(val_dataset) == 1:
+        raise Exception("No valid data found. Check your paths and CSV file.")
+    print(f"Train size: {len(train_dataset)}, Test size: {len(val_dataset)}")
 
-    # Determine dynamic number of classes based on the dataset mapping
-    num_classes = len(dataset.label_map) if dataset.label_map else 2 
-    print(f"Detected {num_classes} classes.")
+    num_classes = len(train_dataset.label_map) if hasattr(train_dataset, 'label_map') else 2
 
-    # testing on a significantly smaller dataset 25 percent
-    small_size = int(0.25 * len(dataset))
-    ignored_size = len(dataset) - small_size
+    # IMPORTANT: batch_size is set to 1 to handle variable sequence lengths (N) # TODO: create padding
+    train_loader = DataLoader(train_dataset,
+                              batch_size=1,
+                              shuffle=True,
+                              num_workers=8,
+                              persistent_workers=True,
+                              pin_memory=True,
+                              prefetch_factor=2,
+                              )
+    test_loader = DataLoader(val_dataset,
+                             batch_size=1,
+                             shuffle=False,
+                             num_workers=8,
+                             persistent_workers=True,
+                             pin_memory = True,
+                             prefetch_factor = 2,
+    )
 
-    # Split it, and use '_' to discard the 75% we don't want
-    small_dataset, _ = random_split(dataset, [small_size, ignored_size])
-    print(f"Subsampled dataset to {len(small_dataset)} items.")
 
-    # 2. Split the small dataset into 80% Train, 20% Test
-    train_size = int(0.8 * len(small_dataset))
-    test_size = len(small_dataset) - train_size
+    # --- Run model ---
+    epochs = args_dict.pop("epochs")
+    accel = args_dict.pop("accelerator")
+    devices = args_dict.pop("devices")
+    grad_accum = args_dict.pop("grad_accum")
+    val_check_interval = args_dict.pop("val_check_interval")
+    seed = args_dict.pop("seed")
+    chosen_model = args_dict.pop("mode")
 
-    train_dataset, test_dataset = random_split(small_dataset, [train_size, test_size])
-    print(f"Train size: {len(train_dataset)}, Test size: {len(test_dataset)}")
+    print(f"Initializing '{chosen_model}' model")
+    model = GeneralModelPL(mode=chosen_model, **args_dict)
 
+    # Create Pytorch-Lightning logging
+    logger = TensorBoardLogger(
+        save_dir=f"./lightning_logs/",
+        name=f"{chosen_model}",
+        version=f"seed_{seed}",
+    )
+    # Callbacks
+    checkpoint_auroc = ModelCheckpoint(
+        monitor="val/auroc",
+        mode="max",
+        save_top_k=2,
+        filename="epoch{epoch:02d}-auroc{val/auroc:.4f}",
+        auto_insert_metric_name=False,
+    )
+    checkpoint_last = ModelCheckpoint(
+        save_last=True,
+        filename="last",
+    )
+    lr_monitor = LearningRateMonitor(logging_interval="epoch")
 
-    # # Split dataset into 80% Train, 20% Test (for the complete dataset)
-    # train_size = int(0.8 * len(dataset))
-    # test_size = len(dataset) - train_size
-    # train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
+    # --- Trainer ---
+    trainer = pl.Trainer(
+        max_epochs=epochs,
+        accelerator=accel if accel is not None else "auto",
+        devices=devices if devices is not None else "auto",
+        precision="16-mixed",  # FP16
+        accumulate_grad_batches=grad_accum,
+        val_check_interval=val_check_interval,
+        gradient_clip_val=1.0,
+        gradient_clip_algorithm="norm",
+        logger=logger,
+        callbacks=[
+            RichProgressBar(),
+            DeviceStatsMonitor(),
+            ElapsedTimer(),
+            GradientNormLogger(),
+            checkpoint_auroc,
+            checkpoint_last,
+            lr_monitor,
+        ],
+        log_every_n_steps=1
+    )
 
-    # IMPORTANT: batch_size is set to 1 to handle variable sequence lengths (N)
-    train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
+    trainer.fit(model, train_loader, test_loader)
 
-    # 1. Train the model (Assuming HDF5 features are size 1280)
-    trained_model, compute_device = train(train_loader, input_dim=1280, num_classes=num_classes) 
-    
-    # 2. Test it
-    test(trained_model, test_loader, compute_device)
-     
-    # 3. Save it
-    torch.save(trained_model.state_dict(), "deepseek_spatial_mil.pth")
-    print("Model weights saved to deepseek_spatial_mil.pth")
+    print(f"\nBest checkpoint (by val/auroc): {checkpoint_auroc.best_model_path}")
+    print(f"Best val/auroc:                 {checkpoint_auroc.best_model_score:.4f}")
