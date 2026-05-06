@@ -1,4 +1,4 @@
-# wsi-segmentation-patching
+# WSI Tissue Segmentation Patching
 
 Tissue-aware patch extraction pipeline for whole-slide histopathology images, with reconstruction utilities.
 
@@ -116,3 +116,5 @@ dataset = Camelyon("slide.tif", stride=4)  # ~1/16 patches
 ## License
 
 MIT. See [LICENSE](LICENSE) for details.
+
+This work is also published at: https://github.com/JalexBf/WSI-Tissue-Patching
