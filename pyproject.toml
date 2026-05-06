@@ -8,13 +8,14 @@ version = "0.1.0"
 description = "Sparse-attention ViT for Whole-Slide Image classification, benchmarked against MIL methods"
 requires-python = ">=3.11"
 dependencies = [
-    "torch>=2.0.0",
-    "torchvision>=0.15.0",
-    "torchmetrics>=1.0.0",
+#    "torch>=2.0.0",
+#    "torchvision>=0.15.0",
+#    "torchmetrics>=1.0.0",
     "pytorch-lightning>=2.0.0",
     "omegaconf>=2.3.0",
     "wandb>=0.15.0",
     "rich>=13.0.0",
+    "local_attention",
     "numpy>=1.21.0",
     "Pillow",
     "h5py",

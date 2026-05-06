@@ -49,7 +49,7 @@ class MILWrapper(LightningWrapperBase):
         """Shared forward + loss computation for train and validation.
 
         Args:
-            batch: Dict with keys ``"input"`` (B, N, D) and ``"label"`` (B,).
+            batch: Dict with keys ``"input"`` (B, N, D), ``"label"`` (B,), and optionally ``"coords"`` (B, N, 2).
             accuracy_calculator: Metric accumulator to update with this step's predictions.
 
         Returns:
@@ -58,7 +58,11 @@ class MILWrapper(LightningWrapperBase):
         inputs = batch["input"]
         labels = batch["label"]
 
-        output_dict = self.network(inputs)
+        # Pass coords to model if it supports them (for spatial models)
+        if getattr(self.network, "uses_coords", False) and "coords" in batch:
+            output_dict = self.network(inputs, coords=batch["coords"])
+        else:
+            output_dict = self.network(inputs)
         logits = output_dict["logits"].squeeze(1)
 
         if not self.multiclass and self.use_bce_loss:
@@ -130,7 +134,11 @@ class MILWrapper(LightningWrapperBase):
         labels = batch["label"]
         slide_names = batch["slide_name"]
 
-        output_dict = self.network(inputs)
+        # Pass coords to model if it supports them (for spatial models)
+        if getattr(self.network, "uses_coords", False) and "coords" in batch:
+            output_dict = self.network(inputs, coords=batch["coords"])
+        else:
+            output_dict = self.network(inputs)
         logits = output_dict["logits"].squeeze(1)
 
         if not self.multiclass and self.use_bce_loss:
