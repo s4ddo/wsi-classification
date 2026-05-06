@@ -35,6 +35,7 @@ class MILWrapper(LightningWrapperBase):
 
         self.train_acc = torchmetrics.Accuracy(**acc_kwargs)
         self.val_acc = torchmetrics.Accuracy(**acc_kwargs)
+        self.test_acc = torchmetrics.Accuracy(**acc_kwargs)
 
         self.use_bce_loss = use_bce_loss
         if self.multiclass and not self.use_bce_loss:
@@ -117,3 +118,44 @@ class MILWrapper(LightningWrapperBase):
         acc = self.val_acc.compute()
         self.log("val/acc", acc, sync_dist=True)
         self.val_acc.reset()
+
+    def test_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> None:
+        """Perform one test step and log predictions with slide names.
+
+        Args:
+            batch: Dict with ``"input"``, ``"label"``, and ``"slide_name"`` tensors.
+            batch_idx: Index of the current batch (unused).
+        """
+        inputs = batch["input"]
+        labels = batch["label"]
+        slide_names = batch["slide_name"]
+
+        output_dict = self.network(inputs)
+        logits = output_dict["logits"].squeeze(1)
+
+        if not self.multiclass and self.use_bce_loss:
+            preds = (torch.sigmoid(logits) >= 0.5).int()
+            probs = torch.sigmoid(logits)
+        else:
+            preds = torch.argmax(logits, dim=-1)
+            probs = torch.softmax(logits, dim=-1)
+
+        # Update accuracy metric
+        self.test_acc.update(preds, labels)
+
+        # Log predictions per slide
+        for slide_name, pred, prob, label in zip(slide_names, preds, probs, labels):
+            self.log_dict(
+                {
+                    f"test/pred_{slide_name}": pred.item(),
+                    f"test/prob_{slide_name}": prob.max().item() if isinstance(prob, torch.Tensor) else prob,
+                    f"test/label_{slide_name}": label.item(),
+                },
+                sync_dist=True,
+            )
+
+    def on_test_epoch_end(self) -> None:
+        """Log epoch-level test accuracy and reset the accumulator."""
+        acc = self.test_acc.compute()
+        self.log("test/acc", acc, sync_dist=True)
+        self.test_acc.reset()

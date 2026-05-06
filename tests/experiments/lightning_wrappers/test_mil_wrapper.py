@@ -117,3 +117,69 @@ def test_mil_wrapper_integration_multiclass():
     loss, _, _ = wrapper._step(batch, wrapper.train_acc)
 
     assert torch.isfinite(loss), "Loss must be finite"
+
+
+# ---------------------------------------------------------------------------
+# Validation step tests
+# ---------------------------------------------------------------------------
+
+def test_validation_step_binary():
+    """Test validation_step for binary classification."""
+    wrapper = _make_binary_wrapper()
+    batch = _make_batch(n_patches=50, label=1)
+
+    # Mock the log method
+    logged_values = {}
+    def mock_log(name, value, **kwargs):
+        logged_values[name] = value
+    wrapper.log = mock_log
+
+    loss = wrapper.validation_step(batch, batch_idx=0)
+
+    assert torch.isfinite(loss), "Validation loss must be finite"
+    assert loss.ndim == 0, "Loss must be a scalar"
+    assert "val/loss" in logged_values, "val/loss should be logged"
+
+
+def test_validation_step_multiclass():
+    """Test validation_step for multiclass classification."""
+    wrapper = _make_multiclass_wrapper(num_classes=3)
+    batch = {
+        "input": torch.randn(1, 40, 64),
+        "label": torch.tensor([1], dtype=torch.long),
+    }
+
+    logged_values = {}
+    def mock_log(name, value, **kwargs):
+        logged_values[name] = value
+    wrapper.log = mock_log
+
+    loss = wrapper.validation_step(batch, batch_idx=0)
+
+    assert torch.isfinite(loss), "Validation loss must be finite"
+    assert "val/loss" in logged_values, "val/loss should be logged"
+
+
+def test_validation_epoch_end_accumulates_metrics():
+    """Test that on_validation_epoch_end computes accumulated validation accuracy."""
+    wrapper = _make_binary_wrapper()
+
+    # Simulate validation steps with perfect predictions
+    for label in [0, 1, 0, 1]:
+        wrapper.val_acc.update(
+            torch.tensor([label]),
+            torch.tensor([label], dtype=torch.long)
+        )
+
+    logged_values = {}
+    def mock_log(name, value, **kwargs):
+        logged_values[name] = value
+    wrapper.log = mock_log
+
+    # Call epoch end
+    wrapper.on_validation_epoch_end()
+
+    # Check that accuracy was logged
+    assert "val/acc" in logged_values, "val/acc should be logged at epoch end"
+    # Perfect predictions should give acc = 1.0
+    assert logged_values["val/acc"] == 1.0

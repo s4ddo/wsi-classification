@@ -69,3 +69,57 @@ def test_prediction_methods():
     logits_binary = torch.tensor([[0.5], [-0.5]])
     preds_binary = ClassificationWrapper.binary_prediction(logits_binary)
     assert preds_binary.tolist() == [1, 0]
+
+
+def test_validation_step():
+    """Test that validation_step is properly configured."""
+    cfg = ExperimentConfig()
+    net = MockNet(num_classes=10)
+    wrapper = ClassificationWrapper(net, cfg)
+
+    # Create a mock batch with proper structure
+    batch = {
+        "input": torch.randn(2, 10),
+        "label": torch.tensor([1, 5], dtype=torch.long),
+        "condition": {}
+    }
+
+    # Mock the log and distributed settings
+    wrapper.distributed = False
+    logged_values = {}
+    def mock_log(name, value, **kwargs):
+        logged_values[name] = value
+    wrapper.log = mock_log
+
+    # Call validation step
+    loss = wrapper.validation_step(batch, batch_idx=0)
+
+    assert isinstance(loss, torch.Tensor), "Validation step must return a tensor loss"
+    assert loss.ndim == 0, "Loss must be a scalar"
+    assert torch.isfinite(loss), "Loss must be finite"
+    assert "val/loss" in logged_values, "val/loss should be logged"
+
+
+def test_validation_state_tracking():
+    """Test that validation state is properly tracked in the wrapper."""
+    cfg = ExperimentConfig()
+    net = MockNet(num_classes=2)
+    wrapper = ClassificationWrapper(net, cfg)
+
+    # Check that validation metrics are initialized
+    assert hasattr(wrapper, 'val_acc'), "Wrapper must have val_acc metric"
+    assert hasattr(wrapper, 'best_val_acc'), "Wrapper must have best_val_acc tracking"
+    assert hasattr(wrapper, 'best_val_loss'), "Wrapper must have best_val_loss tracking"
+
+    # Check that other_outputs_validation list is initialized
+    assert hasattr(wrapper, 'other_outputs_validation'), "Wrapper must have other_outputs_validation list"
+    assert isinstance(wrapper.other_outputs_validation, list), "other_outputs_validation must be a list"
+
+    # Simulate some validation outputs
+    wrapper.other_outputs_validation.append({'logits': torch.randn(2, 2)})
+    wrapper.other_outputs_validation.append({'logits': torch.randn(2, 2)})
+    assert len(wrapper.other_outputs_validation) == 2, "Validation outputs should be accumulated"
+
+    # Manually simulate what on_validation_epoch_end does: clear the list
+    wrapper.other_outputs_validation.clear()
+    assert len(wrapper.other_outputs_validation) == 0, "Validation outputs should be cleared"

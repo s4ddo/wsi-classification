@@ -40,6 +40,7 @@ class ClassificationWrapper(LightningWrapperBase):
             acc_kwargs = {"task": "binary"}
         self.train_acc = torchmetrics.Accuracy(**acc_kwargs)
         self.val_acc = torchmetrics.Accuracy(**acc_kwargs)
+        self.test_acc = torchmetrics.Accuracy(**acc_kwargs)
 
         # Loss metric
         # DeitIII proposes to use BCEWithLogitsLoss for multiclass classification
@@ -278,3 +279,18 @@ class ClassificationWrapper(LightningWrapperBase):
     def binary_prediction(logits):
         """Predict the class with the highest logit for binary classification."""
         return (logits > 0.0).squeeze().long()
+
+    def test_step(self, batch, batch_idx):
+        """Perform a test step and log predictions."""
+        # Perform step with test accuracy tracking
+        predictions, loss, other_outputs = self._step(batch, self.test_acc)
+        # Log test loss
+        self.log("test/loss", loss, sync_dist=self.distributed)
+        # Return loss
+        return loss
+
+    def on_test_epoch_end(self):
+        """Log epoch-level test accuracy."""
+        test_acc = self.test_acc.compute()
+        self.log("test/acc", test_acc, sync_dist=self.distributed)
+        self.test_acc.reset()
