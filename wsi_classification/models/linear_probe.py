@@ -9,6 +9,8 @@ from wsi_classification.models.pos_embeds import SpatialEncoding
 
 
 class LinearProbe(nn.Module):
+    uses_coords = True
+
     def __init__(
         self, input_dim, num_classes=2, use_spatial=False, **kwargs):
         super().__init__()
@@ -21,14 +23,17 @@ class LinearProbe(nn.Module):
 
         self.classifier = nn.Linear(input_dim, num_classes)
 
-    def forward(self, x, coords):
+    def forward(self, x, coords=None):
         B, N, _ = x.shape
 
         if self.pos_embed is not None:
+            if coords is None:
+                raise ValueError("coords are required when use_spatial=True")
             spatial_tokens = self.pos_embed(coords)
             x = x + spatial_tokens
 
         a = F.softmax(self.simple_attn(x), dim=1)
         x_pooled = torch.sum(x * a, dim=1)
 
-        return self.classifier(x_pooled)
+        logits = self.classifier(x_pooled)
+        return {"logits": logits}

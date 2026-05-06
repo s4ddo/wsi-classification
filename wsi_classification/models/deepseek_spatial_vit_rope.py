@@ -117,6 +117,8 @@ class ViTBlock(nn.Module):
 
 
 class DeepSeekSpatialViTRoPE(nn.Module):
+    uses_coords = True
+
     def __init__(self, input_dim=1280, num_classes=2, dim=128, depth=4,
                  num_heads=4, latent_dim=64, num_shared=1, num_routed=4, top_k=2, **kwargs):
         super().__init__()
@@ -133,12 +135,15 @@ class DeepSeekSpatialViTRoPE(nn.Module):
         self.norm = nn.LayerNorm(dim)
         self.head = nn.Linear(dim, num_classes)
 
-    def forward(self, x, coords):
+    def forward(self, x, coords=None):
         """
         Args:
             x (torch.Tensor): Feature bags of shape [B, N, Input_Dim]
-            coords (torch.Tensor): Coordinates of shape [B, N, 2]
+            coords (torch.Tensor, optional): Coordinates of shape [B, N, 2]. Required for this model.
         """
+        if coords is None:
+            raise ValueError("coords are required for DeepSeekSpatialViTRoPE")
+
         B, N, _ = x.shape
 
         # 1. Project 1280D image features to hidden dimension
@@ -159,4 +164,5 @@ class DeepSeekSpatialViTRoPE(nn.Module):
         x = self.norm(x)
 
         # Classification using only the CLS token output
-        return self.head(x[:, 0])
+        logits = self.head(x[:, 0])
+        return {"logits": logits}

@@ -41,6 +41,8 @@ class MambaBlock(nn.Module):
 
 
 class Adventurer(nn.Module):
+    uses_coords = True
+
     def __init__(self, input_dim, num_classes=2, dim=128, depth=4,
                  mamba_d_state=128, mamba_expand=2, mamba_headdim=64, **kwargs):
         super().__init__()
@@ -90,6 +92,6 @@ class Adventurer(nn.Module):
 
         # Classification based on [CLS]
         x = self.norm_f(x[:, -1])
-        out = self.head(x)
+        logits = self.head(x)
 
-        return out
+        return {"logits": logits}

@@ -270,6 +270,8 @@ class NSATransBlock(nn.Module):
 
 
 class NSADeepSeekSpatialViT(nn.Module):
+    uses_coords = True
+
     def __init__(
         self, input_dim, num_classes=2, dim=128, depth=4, num_heads=4,
         latent_dim=64, num_shared=1, num_routed=4, top_k_moe=2,
@@ -295,7 +297,10 @@ class NSADeepSeekSpatialViT(nn.Module):
         self.norm = nn.LayerNorm(dim)
         self.head = nn.Linear(dim, num_classes)
 
-    def forward(self, x, coords):
+    def forward(self, x, coords=None):
+        if coords is None:
+            raise ValueError("coords are required for NSADeepSeekSpatialViT")
+
         B, N, _ = x.shape
 
         x = self.feature_proj(x)
@@ -312,4 +317,5 @@ class NSADeepSeekSpatialViT(nn.Module):
             x = block(x, full_coords)
 
         x = self.norm(x)
-        return self.head(x[:, 0])
+        logits = self.head(x[:, 0])
+        return {"logits": logits}

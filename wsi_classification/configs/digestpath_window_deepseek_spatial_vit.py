@@ -52,7 +52,7 @@ def get_config() -> ExperimentConfig:
     # Windowed attention variant
     config.net = LazyConfig(WinDeepSeekSpatialViT)(
         input_dim=IN_FEATURES,
-        num_classes=OUT_FEATURES if OUT_FEATURES > 1 else 2,
+        num_classes=OUT_FEATURES,
         dim=256,
         depth=4,
         num_heads=8,

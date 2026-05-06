@@ -52,7 +52,7 @@ def get_config() -> ExperimentConfig:
     # Network - Adventurer (Mamba-based model)
     config.net = LazyConfig(Adventurer)(
         input_dim=IN_FEATURES,
-        num_classes=OUT_FEATURES if OUT_FEATURES > 1 else 2,
+        num_classes=OUT_FEATURES,
         dim=256,
         depth=4,
         mamba_d_state=128,

@@ -54,7 +54,7 @@ def get_config() -> ExperimentConfig:
     # Network - LinearProbe
     config.net = LazyConfig(LinearProbe)(
         input_dim=IN_FEATURES,
-        num_classes=OUT_FEATURES if OUT_FEATURES > 1 else 2,
+        num_classes=OUT_FEATURES,
         use_spatial=True  # Enable spatial encoding
     )
 

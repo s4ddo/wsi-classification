@@ -203,6 +203,8 @@ class DeformableTransBlock(nn.Module):
 
 
 class DeformableViT(nn.Module):
+    uses_coords = True
+
     def __init__(
             self, input_dim, num_classes=2, dim=128, depth=4, num_heads=4,
             num_shared=1, num_routed=4, top_k_moe=2,
@@ -227,7 +229,10 @@ class DeformableViT(nn.Module):
         self.norm = nn.LayerNorm(dim)
         self.head = nn.Linear(dim, num_classes)
 
-    def forward(self, x, coords):
+    def forward(self, x, coords=None):
+        if coords is None:
+            raise ValueError("coords are required for DeformableViT")
+
         B, N, _ = x.shape
 
         x = self.feature_proj(x)
@@ -243,4 +248,5 @@ class DeformableViT(nn.Module):
             x = block(x, full_coords, num_special_tokens=1)
 
         x = self.norm(x)
-        return self.head(x[:, 0])
+        logits = self.head(x[:, 0])
+        return {"logits": logits}

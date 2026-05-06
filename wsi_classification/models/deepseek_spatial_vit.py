@@ -153,6 +153,8 @@ class DeepSeekSpatialViT(nn.Module):
         top_k: How many routed experts to activate per token.
     """
 
+    uses_coords = True
+
     def __init__(
         self,
         in_features: int = 1024,
