@@ -14,9 +14,10 @@ from wsi_classification.experiments.lightning_wrappers.mil_wrapper import MILWra
 from wsi_classification.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
 
 # ─── Data Details ──────────────────────────────────────────────
-TRAIN_CSV = "Datasets/camelyon16_train.csv"
-VAL_CSV = "Datasets/camelyon16_val.csv"
-FEATURES_DIR = "Datasets/camelyon16_features"
+TRAIN_CSV = "splits/camely_train.csv"
+VAL_CSV = "splits/camely_val.csv"
+TEST_CSV = "splits/camely_test.csv"
+FEATURES_DIR = "/workspace/data/h5_features"
 
 # ─── Hyperparameters ─────────────────────────────────────────────
 BATCH_SIZE = 1
