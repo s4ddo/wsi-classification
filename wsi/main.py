@@ -19,7 +19,7 @@ from pytorch_lightning.callbacks import (
     ModelCheckpoint,
     LearningRateMonitor,
 )
-from torchmetrics.classification import BinaryAUROC, BinaryF1Score, BinaryConfusionMatrix
+from torchmetrics.classification import BinaryAUROC, BinaryF1Score, BinaryConfusionMatrix, BinaryAveragePrecision
 
 from wsi.h5_dataset import H5FeatureBagDataset
 from wsi.utils import apply_embedding_dropout
@@ -30,15 +30,33 @@ from wsi.models.nsa_deepseek_spatial_vit import NSADeepSeekSpatialViT
 from wsi.models.linear_probe import LinearProbe
 from wsi.models.deformable_detr import DeformableViT
 
+import logging
+logging.getLogger("pytorch_lightning.utilities.data").setLevel(logging.ERROR)
+import warnings
+warnings.filterwarnings("ignore", message=".*No positive samples.*")
+warnings.filterwarnings("ignore", message=".*true positive value should be meaningless.*")
+
+
+torch.set_float32_matmul_precision('medium')
+
 
 class GeneralModelPL(pl.LightningModule):
-    def __init__(self, mode="vanilla", lr=1e-4, weight_decay=1e-6, degrade_embeds_rate=0.0, warmup=3, **kwargs):
+    def __init__(self, 
+    mode="vanilla", 
+    lr=1e-4, 
+    weight_decay=1e-6, 
+    degrade_embeds_rate=0.0, 
+    degrade_embeds_sigma=0.0,
+    warmup=3, 
+    **kwargs
+    ):
         super().__init__()
         self.save_hyperparameters()
         self.mode = mode
         self.lr = lr
         self.weight_decay = weight_decay
         self.degrade_embeds_rate = degrade_embeds_rate
+        self.degrade_embeds_sigma = degrade_embeds_sigma
         self.warmup_epochs = warmup
 
         if mode == "vanilla":   # Full attention
@@ -60,13 +78,24 @@ class GeneralModelPL(pl.LightningModule):
         self.val_auroc = BinaryAUROC()
         self.val_f1 = BinaryF1Score()
         self.val_cm = BinaryConfusionMatrix()
+        self.val_auprc = BinaryAveragePrecision()
 
         self._train_seq_lens = []
 
+        if mode != "nsa":   # NSA can't be compiled because custom kernels
+            if mode in ("adventurer"):
+                self.model = torch.compile(self.model, backend="eager")
+            else:
+                print("Compiling model (this may take a few minutes for the first step)...")
+                self.model = torch.compile(self.model)
+
 
     def forward(self, x, coords):
-        if self.degrade_embeds_rate > 0.01:
-            x = apply_embedding_dropout(x, self.degrade_embeds_rate)
+        if self.training:
+            if self.degrade_embeds_sigma > 0.01:
+                x += torch.randn_like(x) * self.degrade_embeds_sigma
+            if self.degrade_embeds_rate > 0.01:
+                x = apply_embedding_dropout(x, self.degrade_embeds_rate)
         return self.model(x, coords)
 
     def training_step(self, batch, batch_idx):
@@ -104,6 +133,7 @@ class GeneralModelPL(pl.LightningModule):
         self.val_auroc.update(probs_pos, labels)
         self.val_f1.update(preds, labels)
         self.val_cm.update(preds, labels)
+        self.val_auprc.update(probs_pos, labels)
 
         acc = (preds == labels).float().mean()
 
@@ -116,10 +146,12 @@ class GeneralModelPL(pl.LightningModule):
         auroc = self.val_auroc.compute()
         f1 = self.val_f1.compute()
         cm = self.val_cm.compute()
+        auprc = self.val_auprc.compute()
 
         self.log_dict({
             "val/auroc": auroc,
             "val/f1": f1,
+            "val/auprc": auprc
         }, prog_bar=True)
 
         fig = self._make_cm_figure(cm)
@@ -132,6 +164,7 @@ class GeneralModelPL(pl.LightningModule):
         self.val_auroc.reset()
         self.val_f1.reset()
         self.val_cm.reset()
+        self.val_auprc.reset()
 
     def configure_optimizers(self):
         # Separate weight decay: do NOT apply it to biases and LayerNorm params
@@ -214,12 +247,13 @@ class ElapsedTimer(pl.Callback):
 class GradientNormLogger(pl.Callback):
     """Log gradient norm per step."""
     def on_after_backward(self, trainer, pl_module):
-        total_norm = 0.0
-        for p in pl_module.parameters():
-            if p.grad is not None:
-                total_norm += p.grad.detach().norm(2).item() ** 2
-        total_norm = total_norm ** 0.5
-        pl_module.log("train/grad_norm", total_norm, on_step=True, on_epoch=False)
+        if trainer.global_step % 10 == 0:
+            total_norm = 0.0
+            for p in pl_module.parameters():
+                if p.grad is not None:
+                    total_norm += p.grad.detach().norm(2).item() ** 2
+            total_norm = total_norm ** 0.5
+            pl_module.log("train/grad_norm", total_norm, on_step=True, on_epoch=False)
 
 
 
@@ -234,6 +268,8 @@ if __name__ == "__main__":
                         help="Path to val csv.")
     parser.add_argument("--features_dir", type=str, default=None,
                         help="Path to feature dir.")
+    parser.add_argument("--cache", action='store_true',
+                        help="Cache entire dataset into RAM for faster dataloading.")
 
     # Run control
     parser.add_argument("--seed", type=int, default=123,
@@ -247,6 +283,7 @@ if __name__ == "__main__":
     parser.add_argument("--devices", type=int, nargs="+", default=None,
                         help="Pass specific device indices, e.g., --devices 0 1.")
     parser.add_argument("--degrade_embeds_rate", type=float, default=0.0)
+    parser.add_argument("--degrade_embeds_sigma", type=float, default=0.0)
     parser.add_argument("--grad_accum", type=int, default=4,
                         help="Gradient accumulation steps. Effective batch = grad_accum * 1.")
     # Model selection
@@ -279,10 +316,11 @@ if __name__ == "__main__":
     parser.add_argument("--mamba_headdim", type=int, default=64)
 
     # NSA hyperparameters
-    parser.add_argument("--top_k_nsa", type=int, default=8)
-    parser.add_argument("--block_size", type=int, default=64)
-    parser.add_argument("--window_size_nsa", type=int, default=1024)
-    parser.add_argument("--fine_attn_backend", type=str, default="gather", choices=["gather", "flex"])
+    parser.add_argument("--top_k_nsa", type=int, default=4)
+    parser.add_argument("--kernel_size_nsa", type=int, default=128)
+    parser.add_argument("--kernel_stride_nsa", type=int, default=64)
+    parser.add_argument("--block_size_nsa", type=int, default=64)
+    parser.add_argument("--window_size_nsa", type=int, default=128)
 
     args = parser.parse_args()
     args_dict = vars(args)
@@ -295,15 +333,18 @@ if __name__ == "__main__":
     val_csv_path   = args_dict.pop("val_csv")
     features_dir   = args_dict.pop("features_dir")
 
+    cache_whole = args_dict.pop("cache")
     train_dataset = H5FeatureBagDataset(
         csv_path=train_csv_path,
         features_dir=features_dir,
-        label_col_name="label"
+        label_col_name="label",
+        cache=cache_whole,
     )
     val_dataset = H5FeatureBagDataset(
         csv_path=val_csv_path,
         features_dir=features_dir,
-        label_col_name="label"
+        label_col_name="label",
+        cache=cache_whole,
     )
 
     if len(train_dataset) == 0 or len(val_dataset) == 1:
@@ -316,18 +357,18 @@ if __name__ == "__main__":
     train_loader = DataLoader(train_dataset,
                               batch_size=1,
                               shuffle=True,
-                              num_workers=8,
+                              num_workers=8 if not cache_whole else 2,
                               persistent_workers=True,
                               pin_memory=True,
-                              prefetch_factor=2,
+                              prefetch_factor=4 if not cache_whole else 2,
                               )
     test_loader = DataLoader(val_dataset,
                              batch_size=1,
                              shuffle=False,
-                             num_workers=8,
+                             num_workers=8 if not cache_whole else 2,
                              persistent_workers=True,
-                             pin_memory = True,
-                             prefetch_factor = 2,
+                             pin_memory=True,
+                             prefetch_factor=4 if not cache_whole else 2,
     )
 
 
@@ -347,14 +388,14 @@ if __name__ == "__main__":
     logger = TensorBoardLogger(
         save_dir=f"./lightning_logs/",
         name=f"{chosen_model}",
-        version=f"seed_{seed}",
+        version=f"seed{seed}_dr{args_dict.get("degrade_embeds_rate", "null")}_ds{args_dict.get("degrade_embeds_sigma", "null")}",
     )
     # Callbacks
     checkpoint_auroc = ModelCheckpoint(
-        monitor="val/auroc",
-        mode="max",
+        monitor="val/loss",
+        mode="min",
         save_top_k=2,
-        filename="epoch{epoch:02d}-auroc{val/auroc:.4f}",
+        filename="epoch{epoch:02d}-auroc{val/loss:.4f}",
         auto_insert_metric_name=False,
     )
     checkpoint_last = ModelCheckpoint(
@@ -383,7 +424,7 @@ if __name__ == "__main__":
             checkpoint_last,
             lr_monitor,
         ],
-        log_every_n_steps=1
+        log_every_n_steps=50
     )
 
     trainer.fit(model, train_loader, test_loader)

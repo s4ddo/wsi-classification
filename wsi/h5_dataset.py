@@ -11,7 +11,7 @@ class H5FeatureBagDataset(Dataset):
     HDF5 files produced by the FastPathology extraction pipeline.
     Intended for MIL (Multiple Instance Learning) classification.
     """
-    def __init__(self, csv_path, features_dir, label_col_name="label", transform=None):
+    def __init__(self, csv_path, features_dir, label_col_name="label", transform=None, cache=False):
         """
         Args:
             csv_path (str): Path to CSV containing 'slidename' and label.
@@ -67,42 +67,48 @@ class H5FeatureBagDataset(Dataset):
                 })
         
         self.slides = valid_slides
+        
         print(f"Loaded {len(self.slides)} valid WSI feature bags from {features_dir}")
+
+        # LOAD INTO RAM (do this only if you can fit)
+        self._cache = {}
+        if cache:
+            print("Caching dataset into RAM, this can take a few minutes...")
+            for item in self.slides:
+                with h5py.File(item["h5_path"], "r") as f:
+                    feature_key = next(
+                        (k for k in ["features", "embeddings", "imgs", "feat", "data"] if k in f),
+                        None
+                    )
+                    if feature_key is None:
+                        feature_key = next(k for k in f.keys() if k not in ("coords", "coordinates"))
+                    coord_key = "coordinates" if "coordinates" in f else "coords"
+                    self._cache[item["slide_name"]] = (
+                        torch.from_numpy(f[feature_key][:]).float(),
+                        torch.from_numpy(f[coord_key][:]).float(),
+                    )
+            print("Dataset cached.")
 
     def __len__(self) -> int:
         """Return the number of valid slides in the dataset."""
         return len(self.slides)
 
-    def __getitem__(self, idx: int) -> dict:
-        """Load a single slide's feature bag from disk.
-
-        Args:
-            idx: Index into the dataset.
-
-        Returns:
-            Dict with keys:
-                - ``"input"`` (torch.Tensor): Feature bag of shape (N, D), float32.
-                - ``"label"`` (torch.Tensor): Scalar class label, int64.
-                - ``"slide_name"`` (str): Slide identifier.
-                - ``"coords"`` (torch.Tensor): Patch coordinates, shape (N, 2), float32.
-        """
+    def __getitem__(self, idx):
         item = self.slides[idx]
 
-        with h5py.File(item["h5_path"], "r") as f:
-            feature_key = next(
-                (k for k in ["features", "embeddings", "imgs", "feat", "data"] if k in f),
-                None
-            )
-            if feature_key is None:
-                feature_key = next(k for k in f.keys() if k not in ("coords", "coordinates"))
-
-            coord_key = "coordinates" if "coordinates" in f else "coords"
-
-            features = f[feature_key][:]
-            coords = f[coord_key][:]
-
-        features_t = torch.from_numpy(features).float()
-        coords_t = torch.from_numpy(coords).float()
+        if self._cache:
+            features_t, coords_t = self._cache[item["slide_name"]]
+        else:
+            with h5py.File(item["h5_path"], "r") as f:
+                feature_key = next(
+                    (k for k in ["features", "embeddings", "imgs", "feat", "data"] if k in f),
+                    None
+                )
+                if feature_key is None:
+                    feature_key = next(k for k in f.keys() if k not in ("coords", "coordinates"))
+                coord_key = "coordinates" if "coordinates" in f else "coords"
+                features_t = torch.from_numpy(f[feature_key][:]).float()
+                coords_t = torch.from_numpy(f[coord_key][:]).float()
 
         if self.transform is not None:
             features_t = self.transform(features_t)

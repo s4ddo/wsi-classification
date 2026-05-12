@@ -14,7 +14,7 @@ class MultiScaleDeformableAttention(nn.Module):
             num_levels=3,
             num_points=4,
             coord_stride=224.0,
-            downsample_kernel=3,
+            downsample_kernel=5,
     ):
         super().__init__()
         assert dim % num_heads == 0, "dim must be divisible by num_heads"
