@@ -26,7 +26,7 @@ IN_FEATURES = 1280
 OUT_FEATURES = 1
 PRECISION = "bf16-mixed"
 
-TRAINING_ITERATIONS = 3_000
+TRAINING_ITERATIONS = 1_000
 WARMUP_ITERATIONS_PERCENTAGE = 0.05
 LEARNING_RATE = 2e-4
 WEIGHT_DECAY = 1e-4
@@ -51,8 +51,8 @@ def get_config() -> ExperimentConfig:
     config.net = LazyConfig(Adventurer)(
         input_dim=IN_FEATURES,
         num_classes=OUT_FEATURES,
-        dim=256,
-        depth=4,
+        dim=512,
+        depth=2,
         mamba_d_state=128,
         mamba_expand=2,
         mamba_headdim=64
