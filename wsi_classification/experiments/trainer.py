@@ -6,6 +6,7 @@ from typing import Optional
 import pytorch_lightning as pl
 import torch
 from pytorch_lightning import callbacks as pl_callbacks
+from pytorch_lightning.strategies import DDPStrategy
 
 from wsi_classification.experiments.callbacks.wandb_cache_cleanup import WandbCacheCleanupCallback
 from wsi_classification.experiments.default_cfg import ExperimentConfig
@@ -96,7 +97,9 @@ def construct_trainer(
 
     device_count = torch.cuda.device_count()
     if device_count > 1:  # Multi-GPU training
-        strategy = "ddp"
+        # Use DDP with find_unused_parameters=True to support models with
+        # conditional paths (e.g., MoE routing where some experts may not be used)
+        strategy = DDPStrategy(find_unused_parameters=True)
         sync_batchnorm = True
     else:
         strategy = "auto"

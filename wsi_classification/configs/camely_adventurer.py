@@ -14,18 +14,19 @@ from wsi_classification.experiments.lightning_wrappers.mil_wrapper import MILWra
 from wsi_classification.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
 
 # ─── Data Details ──────────────────────────────────────────────
-TRAIN_CSV = "Datasets/camelyon16_train.csv"
-VAL_CSV = "Datasets/camelyon16_val.csv"
-FEATURES_DIR = "Datasets/camelyon16_features"
+TRAIN_CSV = "splits/camely_train.csv"
+VAL_CSV = "splits/camely_val.csv"
+TEST_CSV = "splits/camely_test.csv"
+FEATURES_DIR = "/workspace/data/h5_features"
 
 # ─── Hyperparameters ─────────────────────────────────────────────
 BATCH_SIZE = 1
 NUM_WORKERS = 4
-IN_FEATURES = 1024
+IN_FEATURES = 1280
 OUT_FEATURES = 1
 PRECISION = "bf16-mixed"
 
-TRAINING_ITERATIONS = 3_000
+TRAINING_ITERATIONS = 1_000
 WARMUP_ITERATIONS_PERCENTAGE = 0.05
 LEARNING_RATE = 2e-4
 WEIGHT_DECAY = 1e-4
@@ -49,9 +50,9 @@ def get_config() -> ExperimentConfig:
 
     config.net = LazyConfig(Adventurer)(
         input_dim=IN_FEATURES,
-        num_classes=OUT_FEATURES if OUT_FEATURES > 1 else 2,
-        dim=256,
-        depth=4,
+        num_classes=OUT_FEATURES,
+        dim=512,
+        depth=2,
         mamba_d_state=128,
         mamba_expand=2,
         mamba_headdim=64
@@ -81,7 +82,7 @@ def get_config() -> ExperimentConfig:
     )
 
     config.wandb = WandbConfig(
-        project="wsi-classification-test",
+        project="camely",
         job_group="camely_adventurer",
     )
 
