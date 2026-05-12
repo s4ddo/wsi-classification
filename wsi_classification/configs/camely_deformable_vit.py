@@ -19,7 +19,7 @@ FEATURES_DIR = "Datasets/camelyon16_features"
 
 BATCH_SIZE = 1
 NUM_WORKERS = 4
-IN_FEATURES = 1024
+IN_FEATURES = 1280
 OUT_FEATURES = 1
 PRECISION = "bf16-mixed"
 
