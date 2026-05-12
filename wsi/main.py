@@ -187,10 +187,14 @@ class GeneralModelPL(pl.LightningModule):
         optimizer = torch.optim.AdamW(param_groups, lr=self.lr)
 
         # Linear warmup is important with batch_size=1 and large models
-        def lr_lambda(epoch):
-            if epoch < self.warmup_epochs:
-                return (epoch + 1) / self.warmup_epochs
-            return 1.0
+        def lr_lambda(current_epoch):
+            if current_epoch < self.warmup_epochs:
+                return float(current_epoch + 1) / float(self.warmup_epochs)
+
+            total_post_warmup_epochs = max(1, self.trainer.max_epochs - self.warmup_epochs)
+            progress = float(current_epoch - self.warmup_epochs) / float(total_post_warmup_epochs)
+
+            return 0.5 * (1.0 + math.cos(math.pi * progress))
 
         scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
 
@@ -429,5 +433,5 @@ if __name__ == "__main__":
 
     trainer.fit(model, train_loader, test_loader)
 
-    print(f"\nBest checkpoint (by val/auroc): {checkpoint_auroc.best_model_path}")
-    print(f"Best val/auroc:                 {checkpoint_auroc.best_model_score:.4f}")
+    print(f"\nBest checkpoint: {checkpoint_auroc.best_model_path}")
+    print(f"Best acc:                 {checkpoint_auroc.best_model_score:.4f}")
