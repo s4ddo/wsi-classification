@@ -1,11 +1,12 @@
+import math
+
 import torch
 import torch.nn as nn
-
-from wsi_classification.models.pos_embeds import SpatialEncoding
+import torch.nn.functional as F
 
 
 class MambaBlock(nn.Module):
-    def __init__(self, dim, d_state=128, d_conv=4, expand=2, headdim=64):
+    def __init__(self, dim, d_state=128, d_conv=4, expand=2, headdim=64, dropout=0.1):
         super().__init__()
         try:
             from mamba_ssm import Mamba2
@@ -24,73 +25,100 @@ class MambaBlock(nn.Module):
                                   headdim=headdim)
 
         self.channel_mixer = nn.Sequential(
-            nn.Linear(dim, dim * 2),
+            nn.Linear(dim, dim * 4),
             nn.GELU(),
-            nn.Linear(dim * 2, dim),
+            nn.Dropout(dropout),
+            nn.Linear(dim * 4, dim),
         )
 
     def forward(self, x):
-        # B, N, D = x.shape
-
-        # Token mixer + residual
-        x = x + self.token_mixer(self.norm1(x))
+        # Token mixer + residual - force full precision for Mamba
+        with torch.cuda.amp.autocast(enabled=False):
+            x_norm = self.norm1(x).float()
+            x = x + self.token_mixer(x_norm).to(x.dtype)
         # Channel mixer + residual
         x = x + self.channel_mixer(self.norm2(x))
-
         return x
+
+
+class SpatialEncoding(nn.Module):
+    """Projects 2D coordinates (X, Y) into the hidden dimension."""
+    def __init__(self, dim):
+        super().__init__()
+        self.proj = nn.Sequential(
+            nn.Linear(2, dim // 2),
+            nn.GELU(),
+            nn.Linear(dim // 2, dim)
+        )
+
+    def forward(self, coords):
+        # Scale down coordinates to prevent massive values
+        normalized_coords = coords / 10000.0
+        return self.proj(normalized_coords)
 
 
 class Adventurer(nn.Module):
     uses_coords = True
 
-    def __init__(self, input_dim, num_classes=2, dim=128, depth=4,
-                 mamba_d_state=128, mamba_expand=2, mamba_headdim=64, **kwargs):
+    def __init__(self, input_dim, num_classes=2, dim=512, depth=4,
+                 mamba_d_state=128, mamba_expand=2, mamba_headdim=64,
+                 dropout=0.1, **kwargs):
         super().__init__()
 
         if dim is None:
             dim = input_dim
 
-        self.feature_proj = nn.Linear(input_dim, dim)
+        self.dim = dim
+        self.depth = depth
+
+        # Feature projection
+        self.feature_proj = nn.Sequential(
+            nn.Linear(input_dim, dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+        )
+
+        # Spatial encoding from coordinates
         self.pos_embed = SpatialEncoding(dim)
-        self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
+
+        # Aggregation token - appended at the END so it sees all tokens
+        self.agg_token = nn.Parameter(torch.randn(1, 1, dim) * 0.02)
 
         self.blocks = nn.ModuleList([
             MambaBlock(dim=dim,
                        d_state=mamba_d_state,
                        expand=mamba_expand,
-                       headdim=mamba_headdim
-                       ) for _ in range(depth)
+                       headdim=mamba_headdim,
+                       dropout=dropout)
+            for _ in range(depth)
         ])
 
         self.norm_f = nn.LayerNorm(dim)
-        self.head = nn.Linear(dim, num_classes)
+        self.head = nn.Sequential(
+            nn.Dropout(dropout),
+            nn.Linear(dim, num_classes)
+        )
 
     def forward(self, x, coords):
         B, N, D = x.shape
 
         # Transform features
         x = self.feature_proj(x)
-        # Spatial embedding
+
+        # Add spatial encodings from coordinates
         spatial_tokens = self.pos_embed(coords)
         x = x + spatial_tokens
-        # Append [CLS]
-        x = torch.cat([x, self.cls_token.expand(B, -1, -1)], dim=1)
 
+        # Append aggregation token at the END
+        # This is key: Mamba processes sequentially, so last token sees all
+        agg_tokens = self.agg_token.expand(B, -1, -1)
+        x = torch.cat([x, agg_tokens], dim=1)
+
+        # Pass through Mamba blocks
         for block in self.blocks:
-            # 1. Heading Average
-            avg = x.mean(dim=1, keepdim=True)
-            x = torch.cat([avg, x], dim=1)
-
-            # 2. Block
             x = block(x)
-            x = x[:, 1:]   # Discard average
 
-            # 3. Flip order after every block
-            embeds = x[:, :-1]
-            cls_token = x[:, -1:]
-            x = torch.cat([embeds.flip(1), cls_token], dim=1)   # [CLS] always at the end
-
-        # Classification based on [CLS]
+        # Classification from the aggregation token (last position)
         x = self.norm_f(x[:, -1])
         logits = self.head(x)
 
