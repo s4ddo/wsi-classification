@@ -49,15 +49,14 @@ def get_config() -> ExperimentConfig:
     config.net = LazyConfig(DeformableViT)(
         input_dim=IN_FEATURES,
         num_classes=OUT_FEATURES,
-        dim=512,
-        depth=2,
+        dim=384,
+        depth=4,
         num_heads=8,
-        num_shared=1,
-        num_routed=4,
-        top_k_moe=2,
-        num_levels=3,
+        num_levels=2,  # Reduced from 3 for speed
         num_points=4,
         coord_stride=224.0,
+        dropout=0.1,
+        use_moe=False,  # Use simple FFN instead of MoE for speed
     )
 
     config.lightning_wrapper_class = LazyConfig(MILWrapper)(

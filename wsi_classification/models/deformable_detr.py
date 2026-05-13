@@ -113,12 +113,24 @@ class MultiScaleDeformableAttention(nn.Module):
         sample_loc_h = sample_loc.permute(0, 2, 1, 3, 4).flatten(0, 1)
         # [B*H_, N, P, 2]
 
-        sampled = F.grid_sample(
-            feat_h, sample_loc_h,
-            mode="bilinear",
-            padding_mode="zeros",  # OOB / hole positions contribute 0
-            align_corners=False,
-        )  # [B*H_, hd, N, P]
+        # grid_sample may not have bf16 kernels - use float32
+        if feat_h.dtype == torch.bfloat16:
+            feat_h = feat_h.float()
+            sample_loc_h = sample_loc_h.float()
+            sampled = F.grid_sample(
+                feat_h, sample_loc_h,
+                mode="bilinear",
+                padding_mode="zeros",
+                align_corners=False,
+            )
+            sampled = sampled.to(feat_l.dtype)
+        else:
+            sampled = F.grid_sample(
+                feat_h, sample_loc_h,
+                mode="bilinear",
+                padding_mode="zeros",
+                align_corners=False,
+            )  # [B*H_, hd, N, P]
 
         sampled = sampled.view(B, H_, hd, N, P)
         return sampled.permute(0, 3, 1, 4, 2).contiguous()  # [B, N, H_, P, hd]
@@ -202,32 +214,93 @@ class DeformableTransBlock(nn.Module):
         return x
 
 
+class SimpleFFN(nn.Module):
+    """Standard FFN replacing MoE for speed."""
+    def __init__(self, dim, hidden_dim, dropout=0.1):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(dim, hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, dim),
+            nn.Dropout(dropout),
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+
+class DeformableTransBlockFast(nn.Module):
+    """Block with standard FFN instead of MoE for speed."""
+    def __init__(
+            self, dim, num_heads, mlp_hidden_dim, dropout=0.1,
+            num_levels=3, num_points=4, coord_stride=224.0,
+    ):
+        super().__init__()
+        self.norm1 = nn.LayerNorm(dim)
+        self.attn = MultiScaleDeformableAttention(
+            dim, num_heads=num_heads,
+            num_levels=num_levels, num_points=num_points,
+            coord_stride=coord_stride,
+        )
+        self.norm2 = nn.LayerNorm(dim)
+        self.ffn = SimpleFFN(dim, mlp_hidden_dim, dropout)
+
+    def forward(self, x, coords, num_special_tokens=0):
+        x = x + self.attn(self.norm1(x), coords, num_special_tokens=num_special_tokens)
+        x = x + self.ffn(self.norm2(x))
+        return x
+
+
 class DeformableViT(nn.Module):
     uses_coords = True
 
     def __init__(
-            self, input_dim, num_classes=2, dim=128, depth=4, num_heads=4,
-            num_shared=1, num_routed=4, top_k_moe=2,
-            num_levels=3, num_points=4, coord_stride=224.0,
+            self, input_dim, num_classes=2, dim=384, depth=4, num_heads=8,
+            num_levels=2, num_points=4, coord_stride=224.0, dropout=0.1,
+            use_moe=False, num_shared=1, num_routed=4, top_k_moe=2,
             **kwargs,
     ):
         super().__init__()
-        self.feature_proj = nn.Linear(input_dim, dim)
+        self.feature_proj = nn.Sequential(
+            nn.Linear(input_dim, dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+        )
         self.pos_embed = SpatialEncoding(dim)
-        self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
 
-        self.blocks = nn.ModuleList([
-            DeformableTransBlock(
-                dim, num_heads, num_shared, num_routed, top_k_moe,
-                mlp_hidden_dim=dim * 2,
-                num_levels=num_levels, num_points=num_points,
-                coord_stride=coord_stride,
-            )
-            for _ in range(depth)
-        ])
+        if use_moe:
+            self.blocks = nn.ModuleList([
+                DeformableTransBlock(
+                    dim, num_heads, num_shared, num_routed, top_k_moe,
+                    mlp_hidden_dim=dim * 4,
+                    num_levels=num_levels, num_points=num_points,
+                    coord_stride=coord_stride,
+                )
+                for _ in range(depth)
+            ])
+        else:
+            self.blocks = nn.ModuleList([
+                DeformableTransBlockFast(
+                    dim, num_heads, mlp_hidden_dim=dim * 4, dropout=dropout,
+                    num_levels=num_levels, num_points=num_points,
+                    coord_stride=coord_stride,
+                )
+                for _ in range(depth)
+            ])
+
+        # Attention pooling for better aggregation
+        self.attn_pool = nn.Sequential(
+            nn.Linear(dim, dim // 2),
+            nn.Tanh(),
+            nn.Linear(dim // 2, 1)
+        )
 
         self.norm = nn.LayerNorm(dim)
-        self.head = nn.Linear(dim, num_classes)
+        self.head = nn.Sequential(
+            nn.Dropout(dropout),
+            nn.Linear(dim * 2, num_classes)  # *2 for concat of attn_pool and mean
+        )
 
     def forward(self, x, coords=None):
         if coords is None:
@@ -238,15 +311,16 @@ class DeformableViT(nn.Module):
         x = self.feature_proj(x)
         x = x + self.pos_embed(coords)
 
-        cls_tokens = self.cls_token.expand(B, -1, -1)
-        x = torch.cat([cls_tokens, x], dim=1)  # [B, N+1, D]
-
-        cls_coords = coords.float().mean(dim=1, keepdim=True)
-        full_coords = torch.cat([cls_coords, coords], dim=1)
-
         for block in self.blocks:
-            x = block(x, full_coords, num_special_tokens=1)
+            x = block(x, coords, num_special_tokens=0)
 
         x = self.norm(x)
-        logits = self.head(x[:, 0])
+
+        # Attention pooling + mean pooling for global aggregation
+        attn_weights = F.softmax(self.attn_pool(x), dim=1)
+        attn_pooled = torch.sum(attn_weights * x, dim=1)
+        mean_pooled = x.mean(dim=1)
+
+        pooled = torch.cat([attn_pooled, mean_pooled], dim=-1)
+        logits = self.head(pooled)
         return {"logits": logits}
