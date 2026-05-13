@@ -6,7 +6,7 @@ import torch.nn.functional as F
 
 
 class MambaBlock(nn.Module):
-    def __init__(self, dim, d_state=128, d_conv=4, expand=2, headdim=64, dropout=0.1):
+    def __init__(self, dim, d_state=128, d_conv=4, expand=2, headdim=64, dropout=0.1, bidirectional=False):
         super().__init__()
         try:
             from mamba_ssm import Mamba2
@@ -17,12 +17,22 @@ class MambaBlock(nn.Module):
 
         self.norm1 = nn.LayerNorm(dim)
         self.norm2 = nn.LayerNorm(dim)
+        self.bidirectional = bidirectional
 
         self.token_mixer = Mamba2(d_model=dim,
                                   d_state=d_state,
                                   d_conv=d_conv,
                                   expand=expand,
                                   headdim=headdim)
+
+        if bidirectional:
+            self.token_mixer_rev = Mamba2(d_model=dim,
+                                          d_state=d_state,
+                                          d_conv=d_conv,
+                                          expand=expand,
+                                          headdim=headdim)
+            self.norm_rev = nn.LayerNorm(dim)
+            self.fusion = nn.Linear(dim * 2, dim)
 
         self.channel_mixer = nn.Sequential(
             nn.Linear(dim, dim * 4),
@@ -33,7 +43,16 @@ class MambaBlock(nn.Module):
 
     def forward(self, x):
         # Token mixer + residual
-        x = x + self.token_mixer(self.norm1(x))
+        x_out = self.token_mixer(self.norm1(x))
+
+        if self.bidirectional:
+            # Reverse direction
+            x_rev = self.token_mixer_rev(self.norm_rev(x.flip(1)))
+            x_rev = x_rev.flip(1)
+            # Fusion
+            x_out = self.fusion(torch.cat([x_out, x_rev], dim=-1))
+
+        x = x + x_out
         # Channel mixer + residual
         x = x + self.channel_mixer(self.norm2(x))
         return x
@@ -60,7 +79,7 @@ class Adventurer(nn.Module):
 
     def __init__(self, input_dim, num_classes=2, dim=512, depth=4,
                  mamba_d_state=128, mamba_expand=2, mamba_headdim=64,
-                 dropout=0.1, **kwargs):
+                 dropout=0.1, bidirectional=True, **kwargs):
         super().__init__()
 
         if dim is None:
@@ -79,22 +98,27 @@ class Adventurer(nn.Module):
         # Spatial encoding from coordinates
         self.pos_embed = SpatialEncoding(dim)
 
-        # Aggregation token - appended at the END so it sees all tokens
-        self.agg_token = nn.Parameter(torch.randn(1, 1, dim) * 0.02)
-
         self.blocks = nn.ModuleList([
             MambaBlock(dim=dim,
                        d_state=mamba_d_state,
                        expand=mamba_expand,
                        headdim=mamba_headdim,
-                       dropout=dropout)
+                       dropout=dropout,
+                       bidirectional=bidirectional)
             for _ in range(depth)
         ])
+
+        # Attention pooling for better aggregation
+        self.attn_pool = nn.Sequential(
+            nn.Linear(dim, dim // 2),
+            nn.Tanh(),
+            nn.Linear(dim // 2, 1)
+        )
 
         self.norm_f = nn.LayerNorm(dim)
         self.head = nn.Sequential(
             nn.Dropout(dropout),
-            nn.Linear(dim, num_classes)
+            nn.Linear(dim * 2, num_classes)  # *2 for concat of attn_pool and mean
         )
 
     def forward(self, x, coords):
@@ -107,17 +131,22 @@ class Adventurer(nn.Module):
         spatial_tokens = self.pos_embed(coords)
         x = x + spatial_tokens
 
-        # Append aggregation token at the END
-        # This is key: Mamba processes sequentially, so last token sees all
-        agg_tokens = self.agg_token.expand(B, -1, -1)
-        x = torch.cat([x, agg_tokens], dim=1)
-
         # Pass through Mamba blocks
         for block in self.blocks:
             x = block(x)
 
-        # Classification from the aggregation token (last position)
-        x = self.norm_f(x[:, -1])
-        logits = self.head(x)
+        x = self.norm_f(x)
+
+        # Attention pooling - learns to weight important tokens
+        attn_weights = F.softmax(self.attn_pool(x), dim=1)  # [B, N, 1]
+        attn_pooled = torch.sum(attn_weights * x, dim=1)    # [B, dim]
+
+        # Mean pooling as additional global feature
+        mean_pooled = x.mean(dim=1)                         # [B, dim]
+
+        # Combine both pooling methods
+        pooled = torch.cat([attn_pooled, mean_pooled], dim=-1)
+
+        logits = self.head(pooled)
 
         return {"logits": logits}
