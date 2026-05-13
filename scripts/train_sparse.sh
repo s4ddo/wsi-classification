@@ -14,10 +14,10 @@ for mode in "vanilla" "windowed" "nsa" "adventurer" "defr" "probe"; do
             --val_csv   "${TRAIN_SPLIT_DIR}/camelyon_nmlbl_seed${seed}_val.csv" \
             --features_dir "$FEATURES_DIR" \
             --seed $seed \
-            --epochs 5 \
+            --epochs 10 \
             --accelerator cuda \
             --devices 0 \
-            --grad_accum 4 \
+            --grad_accum 8 \
             --val_check_interval 200 \
             --mode $mode \
             --lr 1e-4 \
@@ -27,7 +27,7 @@ for mode in "vanilla" "windowed" "nsa" "adventurer" "defr" "probe"; do
             --degrade_embeds_sigma 0.0 \
             --input_dim 1280 \
             --num_classes 2 \
-            --dim 128 \
+            --dim 256 \
             --depth 6 \
             --num_heads 8 \
             --latent_dim 64 \
