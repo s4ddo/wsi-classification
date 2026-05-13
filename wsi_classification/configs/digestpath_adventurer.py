@@ -24,7 +24,7 @@ BATCH_SIZE = 1  # Standard for MIL bags
 NUM_WORKERS = 4
 IN_FEATURES = 1024  # UNI embeddings are 1024-dim
 OUT_FEATURES = 1  # Binary task (cancerous vs non-cancerous)
-PRECISION = "32"
+PRECISION = "bf16-mixed"
 
 TRAINING_ITERATIONS = 3_000
 WARMUP_ITERATIONS_PERCENTAGE = 0.05

@@ -32,13 +32,8 @@ class MambaBlock(nn.Module):
         )
 
     def forward(self, x):
-        # Token mixer + residual - Mamba kernels require full precision
-        x_norm = self.norm1(x)
-        if x_norm.dtype != torch.float32:
-            x_mixed = self.token_mixer(x_norm.float()).to(x.dtype)
-        else:
-            x_mixed = self.token_mixer(x_norm)
-        x = x + x_mixed
+        # Token mixer + residual
+        x = x + self.token_mixer(self.norm1(x))
         # Channel mixer + residual
         x = x + self.channel_mixer(self.norm2(x))
         return x
