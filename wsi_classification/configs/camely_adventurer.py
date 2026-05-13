@@ -51,12 +51,13 @@ def get_config() -> ExperimentConfig:
     config.net = LazyConfig(Adventurer)(
         input_dim=IN_FEATURES,
         num_classes=OUT_FEATURES,
-        dim=512,
+        dim=384,
         depth=4,
-        mamba_d_state=256,
+        mamba_d_state=128,
         mamba_expand=2,
         mamba_headdim=64,
         dropout=0.1,
+        bidirectional=False,
     )
 
     config.lightning_wrapper_class = LazyConfig(MILWrapper)(
