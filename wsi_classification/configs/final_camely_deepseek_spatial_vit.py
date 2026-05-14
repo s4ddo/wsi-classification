@@ -21,10 +21,10 @@ FEATURES_DIR = "/workspace/data/h5_features"
 # ─── Hyperparameters ─────────────────────────────────────────────
 BATCH_SIZE = 1  # MIL bags have variable sequence lengths — keep at 1
 NUM_WORKERS = 4
-IN_FEATURES = 1024  # UNI embeddings
+IN_FEATURES = 1280  # UNI embeddings
 OUT_FEATURES = 1  # Binary task via BCEWithLogitsLoss (cancerous vs non-cancerous)
-DIM = 256
-DEPTH = 4
+DIM = 208  # Scaled down for ~2.38M params (was 256)
+DEPTH = 2  # Scaled down for ~2.38M params (was 4)
 NUM_HEADS = 8
 HIDDEN_DIM = 512
 LATENT_DIM = 128
