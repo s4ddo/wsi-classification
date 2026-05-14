@@ -311,7 +311,6 @@ class TransMIL(nn.Module):
         self.out_features = out_features
 
         self.feature_proj = nn.Sequential(nn.Linear(in_features, hidden_dim), nn.ReLU())
-        self.cls_token = nn.Parameter(torch.randn(1, 1, hidden_dim))
         self.layer1 = TransLayer(
             dim=hidden_dim,
             heads=heads,
@@ -331,8 +330,16 @@ class TransMIL(nn.Module):
             attention_type=attention_type,
             sparse_window_size=sparse_window_size,
         )
+
+        # Attention pooling for better aggregation
+        self.attn_pool = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.Tanh(),
+            nn.Linear(hidden_dim // 2, 1)
+        )
+
         self.norm = nn.LayerNorm(hidden_dim)
-        self.classifier = nn.Linear(hidden_dim, out_features)
+        self.classifier = nn.Linear(hidden_dim * 2, out_features)
 
     def forward(self, x: torch.Tensor, return_attention: bool = False) -> dict:
         """Run model."""
@@ -352,14 +359,27 @@ class TransMIL(nn.Module):
         if add_len > 0:
             h = torch.cat([h, h[:, :add_len, :]], dim=1)
 
-        cls_tokens = self.cls_token.expand(h.size(0), -1, -1)
-        h = torch.cat((cls_tokens, h), dim=1)
+        # Add dummy token for PPEG compatibility (will be removed)
+        dummy_token = h.new_zeros(h.size(0), 1, h.size(-1))
+        h = torch.cat((dummy_token, h), dim=1)
         h = self.layer1(h)
         h = self.pos_layer(h, grid_size, grid_size)
         h = self.layer2(h)
-        logits = self.classifier(self.norm(h)[:, 0])
+        h = h[:, 1:]  # Remove dummy token
+        h = self.norm(h)
+
+        # Attention pooling - learns to weight important tokens
+        attn_weights = F.softmax(self.attn_pool(h), dim=1)  # [B, N, 1]
+        attn_pooled = torch.sum(attn_weights * h, dim=1)    # [B, hidden_dim]
+
+        # Mean pooling as additional global feature
+        mean_pooled = h.mean(dim=1)                         # [B, hidden_dim]
+
+        # Combine both pooling methods
+        pooled = torch.cat([attn_pooled, mean_pooled], dim=-1)
+        logits = self.classifier(pooled)
 
         out = {"logits": logits}
         if return_attention:
-            out["attention"] = torch.ones(logits.size(0), 1, h.size(1), device=h.device) / h.size(1)
+            out["attention"] = attn_weights.transpose(1, 2)  # [B, 1, N]
         return out

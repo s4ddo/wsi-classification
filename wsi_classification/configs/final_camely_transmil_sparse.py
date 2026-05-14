@@ -1,17 +1,16 @@
-"""Adventurer (Mamba-based) classification config for Camelyon16 dataset.
+"""TransMIL (Sparse window attention) config for DigestPath dataset.
 
 Usage:
-    python -m wsi_classification.run --config wsi_classification/configs/camely_adventurer.py
+    python -m wsi_classification.run --config wsi_classification/configs/baseline_transmil_sparse.py
 """
 
 import torch
 
-from wsi_classification.experiments.default_cfg import ExperimentConfig, SchedulerConfig, TrainConfig, WandbConfig
-from wsi_classification.experiments.utils.lazy_config import LazyConfig
-
-from wsi_classification.models.adventurer import Adventurer
-from wsi_classification.experiments.lightning_wrappers.mil_wrapper import MILWrapper
 from wsi_classification.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
+from wsi_classification.experiments.default_cfg import ExperimentConfig, SchedulerConfig, TrainConfig, WandbConfig
+from wsi_classification.experiments.lightning_wrappers.mil_wrapper import MILWrapper
+from wsi_classification.experiments.utils.lazy_config import LazyConfig
+from wsi_classification.models.transmil import TransMIL
 
 # ─── Data Details ──────────────────────────────────────────────
 TRAIN_CSV = "splits/camely_train.csv"
@@ -20,10 +19,14 @@ TEST_CSV = "splits/camely_test.csv"
 FEATURES_DIR = "/workspace/data/h5_features"
 
 # ─── Hyperparameters ─────────────────────────────────────────────
-BATCH_SIZE = 1
+BATCH_SIZE = 1  # MIL bags have variable sequence lengths — keep at 1
 NUM_WORKERS = 4
 IN_FEATURES = 1280
-OUT_FEATURES = 1
+OUT_FEATURES = 1  # Binary task (cancerous vs non-cancerous)
+HIDDEN_DIM = 512
+NUM_HEADS = 8
+SPARSE_WINDOW_SIZE = 7
+DROPOUT = 0.1
 PRECISION = "bf16-mixed"
 
 TRAINING_ITERATIONS = 1_000
@@ -37,38 +40,42 @@ def get_config() -> ExperimentConfig:
     config = ExperimentConfig()
     config.debug = False
     config.seed = 42
-    config.test.do = False
+    config.test.do = True
 
+    # Dataset
     config.dataset = LazyConfig(H5FeatureBagDataModule)(
         train_csv=TRAIN_CSV,
         val_csv=VAL_CSV,
+        test_csv=TEST_CSV,
         features_dir=FEATURES_DIR,
         label_col_name="label",
         batch_size=BATCH_SIZE,
-        num_workers=NUM_WORKERS
+        num_workers=NUM_WORKERS,
     )
 
-    config.net = LazyConfig(Adventurer)(
-        input_dim=IN_FEATURES,
-        num_classes=OUT_FEATURES,
-        dim=384,
-        depth=4,
-        mamba_d_state=128,
-        mamba_expand=2,
-        mamba_headdim=64,
-        dropout=0.1,
-        bidirectional=False,
+    # Network
+    config.net = LazyConfig(TransMIL)(
+        in_features=IN_FEATURES,
+        hidden_dim=448,  # Scaled down for ~2.3M params (was 512)
+        out_features=OUT_FEATURES,
+        heads=NUM_HEADS,
+        dropout=DROPOUT,
+        attention_type="sparse",
+        sparse_window_size=SPARSE_WINDOW_SIZE,
     )
 
+    # Lightning wrapper
     config.lightning_wrapper_class = LazyConfig(MILWrapper)(
-        use_bce_loss=(OUT_FEATURES == 1)
+        use_bce_loss=(OUT_FEATURES == 1),
     )
 
+    # Optimizer
     config.optimizer = LazyConfig(torch.optim.AdamW)(
         lr=LEARNING_RATE,
         weight_decay=WEIGHT_DECAY,
     )
 
+    # Training
     config.train = TrainConfig(
         batch_size=BATCH_SIZE,
         iterations=TRAINING_ITERATIONS,
@@ -76,6 +83,7 @@ def get_config() -> ExperimentConfig:
         precision=PRECISION,
     )
 
+    # Scheduler
     config.scheduler = SchedulerConfig(
         name="cosine",
         warmup_iterations_percentage=WARMUP_ITERATIONS_PERCENTAGE,
@@ -83,9 +91,10 @@ def get_config() -> ExperimentConfig:
         mode="max",
     )
 
+    # Wandb
     config.wandb = WandbConfig(
-        project="camely",
-        job_group="camely_adventurer",
+        project="wsi-classification-test",
+        job_group="digestpath_transmil_sparse",
     )
 
     return config

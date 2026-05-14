@@ -1,7 +1,7 @@
-"""DeepSeekSpatialViT with RoPE classification config for Camelyon16 dataset.
+"""Deformable DETR config for Camelyon16 dataset.
 
 Usage:
-    python -m wsi_classification.run --config wsi_classification/configs/camely_deepseek_spatial_vit_rope.py
+    python -m wsi_classification.run --config wsi_classification/configs/camely_deformable_vit.py
 """
 
 import torch
@@ -9,21 +9,22 @@ import torch
 from wsi_classification.experiments.default_cfg import ExperimentConfig, SchedulerConfig, TrainConfig, WandbConfig
 from wsi_classification.experiments.utils.lazy_config import LazyConfig
 
-from wsi_classification.models.deepseek_spatial_vit_rope import DeepSeekSpatialViTRoPE
+from wsi_classification.models.deformable_detr import DeformableViT
 from wsi_classification.experiments.lightning_wrappers.mil_wrapper import MILWrapper
 from wsi_classification.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
 
-TRAIN_CSV = "Datasets/camelyon16_train.csv"
-VAL_CSV = "Datasets/camelyon16_val.csv"
-FEATURES_DIR = "Datasets/camelyon16_features"
+TRAIN_CSV = "splits/camely_train.csv"
+VAL_CSV = "splits/camely_val.csv"
+TEST_CSV = "splits/camely_test.csv"
+FEATURES_DIR = "/workspace/data/h5_features"
 
 BATCH_SIZE = 1
 NUM_WORKERS = 4
-IN_FEATURES = 1024
+IN_FEATURES = 1280
 OUT_FEATURES = 1
 PRECISION = "bf16-mixed"
 
-TRAINING_ITERATIONS = 3_000
+TRAINING_ITERATIONS = 1_000
 WARMUP_ITERATIONS_PERCENTAGE = 0.05
 LEARNING_RATE = 2e-4
 WEIGHT_DECAY = 1e-4
@@ -45,16 +46,17 @@ def get_config() -> ExperimentConfig:
         num_workers=NUM_WORKERS
     )
 
-    config.net = LazyConfig(DeepSeekSpatialViTRoPE)(
+    config.net = LazyConfig(DeformableViT)(
         input_dim=IN_FEATURES,
-        num_classes=OUT_FEATURES if OUT_FEATURES > 1 else 2,
-        dim=256,
-        depth=4,
+        num_classes=OUT_FEATURES,
+        dim=296,  # Scaled down for ~2.34M params (was 384)
+        depth=2,  # Scaled down for ~2.34M params (was 4)
         num_heads=8,
-        latent_dim=128,
-        num_shared=1,
-        num_routed=4,
-        top_k=2,
+        num_levels=2,
+        num_points=4,
+        coord_stride=224.0,
+        dropout=0.1,
+        use_moe=False,
     )
 
     config.lightning_wrapper_class = LazyConfig(MILWrapper)(
@@ -81,8 +83,8 @@ def get_config() -> ExperimentConfig:
     )
 
     config.wandb = WandbConfig(
-        project="wsi-classification-test",
-        job_group="camely_deepseek_spatial_vit_rope",
+        project="camely",
+        job_group="camely_deformable_vit",
     )
 
     return config

@@ -73,7 +73,7 @@ class VanillaTransformer(nn.Module):
     """Vanilla transformer for direct sequence classification without MIL aggregation.
 
     Takes a sequence of instance features and uses standard transformer self-attention
-    to process them, then aggregates with a learnable CLS token for classification.
+    to process them, then aggregates with attention pooling + mean pooling for classification.
     Optionally supports spatial coordinate encoding.
 
     Args:
@@ -83,10 +83,6 @@ class VanillaTransformer(nn.Module):
         depth: Number of ViT blocks.
         num_heads: Number of attention heads in transformer.
         hidden_dim: Hidden dimension for the transformer feedforward networks.
-        pool_method: How to aggregate sequence to classification logits. Options:
-            - "cls": Use a learnable [CLS] token (default, like BERT).
-            - "mean": Use mean pooling over the sequence.
-            - "max": Use max pooling over the sequence.
     """
 
     def __init__(
@@ -97,22 +93,14 @@ class VanillaTransformer(nn.Module):
         depth: int = 4,
         num_heads: int = 8,
         hidden_dim: int = 2048,
-        pool_method: str = "cls",
     ):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
-        self.pool_method = pool_method
-
-        if pool_method not in ("cls", "mean", "max"):
-            raise ValueError(f"pool_method must be one of 'cls', 'mean', 'max', got {pool_method}.")
 
         # Project features to hidden dimension
         self.feature_proj = nn.Linear(in_features, dim)
         self.pos_embed = _SpatialEncoding(dim)
-
-        # Learnable CLS token
-        self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
 
         # Transformer blocks
         self.blocks = nn.ModuleList([
@@ -120,9 +108,16 @@ class VanillaTransformer(nn.Module):
             for _ in range(depth)
         ])
 
+        # Attention pooling for better aggregation
+        self.attn_pool = nn.Sequential(
+            nn.Linear(dim, dim // 2),
+            nn.Tanh(),
+            nn.Linear(dim // 2, 1)
+        )
+
         # Final norm and classification head
         self.norm = nn.LayerNorm(dim)
-        self.head = nn.Linear(dim, out_features)
+        self.head = nn.Linear(dim * 2, out_features)
 
     def forward(self, x: torch.Tensor, coords: torch.Tensor | None = None, return_attention: bool = False) -> dict:
         """Run a forward pass over a sequence of features.
@@ -169,10 +164,6 @@ class VanillaTransformer(nn.Module):
         if coords is not None:
             x = x + self.pos_embed(coords)
 
-        # Add CLS token
-        cls_tokens = self.cls_token.expand(B, -1, -1)
-        x = torch.cat([cls_tokens, x], dim=1)
-
         # Apply transformer blocks
         for block in self.blocks:
             x = block(x)
@@ -180,21 +171,20 @@ class VanillaTransformer(nn.Module):
         # Final normalization
         x = self.norm(x)
 
-        # Pool based on method
-        if self.pool_method == "cls":
-            pooled = x[:, 0, :]
-            seq_len = N + 1
-        elif self.pool_method == "mean":
-            pooled = x[:, 1:, :].mean(dim=1)
-            seq_len = N
-        elif self.pool_method == "max":
-            pooled = x[:, 1:, :].max(dim=1)[0]
-            seq_len = N
+        # Attention pooling - learns to weight important tokens
+        attn_weights = F.softmax(self.attn_pool(x), dim=1)  # [B, N, 1]
+        attn_pooled = torch.sum(attn_weights * x, dim=1)    # [B, dim]
+
+        # Mean pooling as additional global feature
+        mean_pooled = x.mean(dim=1)                         # [B, dim]
+
+        # Combine both pooling methods
+        pooled = torch.cat([attn_pooled, mean_pooled], dim=-1)
 
         logits = self.head(pooled)
 
         out = {"logits": logits}
         if return_attention:
-            attention_scores = torch.ones(B, 1, seq_len, device=x.device) / seq_len
+            attention_scores = attn_weights.transpose(1, 2)  # [B, 1, N]
             out["attention"] = attention_scores
         return out

@@ -60,7 +60,7 @@ def get_config() -> ExperimentConfig:
     # CLAM_MB model (Multi-Branch with class-specific attention)
     config.net = LazyConfig(CLAM_MB)(
         gate=GATE,
-        size_arg=SIZE_ARG,
+        size_arg="big",  # Scaled up for ~1.45M params (best achievable without model changes)
         dropout=DROPOUT,
         k_sample=K_SAMPLE,
         n_classes=N_CLASSES,

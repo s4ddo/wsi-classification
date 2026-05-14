@@ -1,9 +1,7 @@
-"""Native Sparse Attention DeepSeekSpatialViT config for DigestPath dataset.
-
-Multi-branch sparse attention (compression, selection, sliding window).
+"""Adventurer (Mamba-based) classification config for Camelyon16 dataset.
 
 Usage:
-    python -m wsi_classification.run --config wsi_classification/configs/digestpath_nsa_deepseek_spatial_vit.py
+    python -m wsi_classification.run --config wsi_classification/configs/camely_adventurer.py
 """
 
 import torch
@@ -11,23 +9,24 @@ import torch
 from wsi_classification.experiments.default_cfg import ExperimentConfig, SchedulerConfig, TrainConfig, WandbConfig
 from wsi_classification.experiments.utils.lazy_config import LazyConfig
 
-from wsi_classification.models.nsa_deepseek_spatial_vit import NSADeepSeekSpatialViT
+from wsi_classification.models.adventurer import Adventurer
 from wsi_classification.experiments.lightning_wrappers.mil_wrapper import MILWrapper
 from wsi_classification.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
 
 # ─── Data Details ──────────────────────────────────────────────
-TRAIN_CSV = "Datasets/DigestPath_train.csv"
-VAL_CSV = "Datasets/DigestPath_val.csv"
-FEATURES_DIR = "Datasets/DigestPath_UNI_features"
+TRAIN_CSV = "splits/camely_train.csv"
+VAL_CSV = "splits/camely_val.csv"
+TEST_CSV = "splits/camely_test.csv"
+FEATURES_DIR = "/workspace/data/h5_features"
 
 # ─── Hyperparameters ─────────────────────────────────────────────
 BATCH_SIZE = 1
 NUM_WORKERS = 4
-IN_FEATURES = 1024  # UNI embeddings
+IN_FEATURES = 1280
 OUT_FEATURES = 1
 PRECISION = "bf16-mixed"
 
-TRAINING_ITERATIONS = 3_000
+TRAINING_ITERATIONS = 1_000
 WARMUP_ITERATIONS_PERCENTAGE = 0.05
 LEARNING_RATE = 2e-4
 WEIGHT_DECAY = 1e-4
@@ -49,21 +48,16 @@ def get_config() -> ExperimentConfig:
         num_workers=NUM_WORKERS
     )
 
-    # Native Sparse Attention variant
-    config.net = LazyConfig(NSADeepSeekSpatialViT)(
+    config.net = LazyConfig(Adventurer)(
         input_dim=IN_FEATURES,
         num_classes=OUT_FEATURES,
-        dim=256,
-        depth=4,
-        num_heads=8,
-        latent_dim=128,
-        num_shared=1,
-        num_routed=4,
-        top_k_moe=2,
-        block_size=16,
-        window_size_nsa=64,
-        top_k_nsa=4,
-        fine_attn_backend="gather",
+        dim=256,  # Scaled down for ~2.37M params (was 384)
+        depth=2,  # Scaled down for ~2.37M params (was 4)
+        mamba_d_state=128,
+        mamba_expand=2,
+        mamba_headdim=64,
+        dropout=0.1,
+        bidirectional=False,
     )
 
     config.lightning_wrapper_class = LazyConfig(MILWrapper)(
@@ -90,8 +84,8 @@ def get_config() -> ExperimentConfig:
     )
 
     config.wandb = WandbConfig(
-        project="wsi-classification-test",
-        job_group="digestpath_nsa_deepseek_spatial_vit",
+        project="camely",
+        job_group="camely_adventurer",
     )
 
     return config

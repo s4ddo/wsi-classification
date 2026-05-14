@@ -1,9 +1,7 @@
-"""DeepSeekSpatialViT with RoPE classification config for DigestPath dataset.
-
-This is the original implementation with Rotary Positional Embeddings.
+"""Windowed DeepSeekSpatialViT config for Camelyon16 dataset.
 
 Usage:
-    python -m wsi_classification.run --config wsi_classification/configs/digestpath_deepseek_spatial_vit_rope.py
+    python -m wsi_classification.run --config wsi_classification/configs/camely_window_deepseek_spatial_vit.py
 """
 
 import torch
@@ -11,19 +9,18 @@ import torch
 from wsi_classification.experiments.default_cfg import ExperimentConfig, SchedulerConfig, TrainConfig, WandbConfig
 from wsi_classification.experiments.utils.lazy_config import LazyConfig
 
-from wsi_classification.models.deepseek_spatial_vit_rope import DeepSeekSpatialViTRoPE
+from wsi_classification.models.window_deepseek_spatial_vit import WinDeepSeekSpatialViT
 from wsi_classification.experiments.lightning_wrappers.mil_wrapper import MILWrapper
 from wsi_classification.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
 
-# ─── Data Details ──────────────────────────────────────────────
-TRAIN_CSV = "Datasets/DigestPath_train.csv"
-VAL_CSV = "Datasets/DigestPath_val.csv"
-FEATURES_DIR = "Datasets/DigestPath_UNI_features"
+TRAIN_CSV = "splits/camely_train.csv"
+VAL_CSV = "splits/camely_val.csv"
+TEST_CSV = "splits/camely_test.csv"
+FEATURES_DIR = "/workspace/data/h5_features"
 
-# ─── Hyperparameters ─────────────────────────────────────────────
 BATCH_SIZE = 1
 NUM_WORKERS = 4
-IN_FEATURES = 1024  # UNI embeddings
+IN_FEATURES = 1280
 OUT_FEATURES = 1
 PRECISION = "bf16-mixed"
 
@@ -49,17 +46,17 @@ def get_config() -> ExperimentConfig:
         num_workers=NUM_WORKERS
     )
 
-    # DeepSeekSpatialViT with RoPE - requires coordinates
-    config.net = LazyConfig(DeepSeekSpatialViTRoPE)(
+    config.net = LazyConfig(WinDeepSeekSpatialViT)(
         input_dim=IN_FEATURES,
-        num_classes=OUT_FEATURES,
-        dim=256,
-        depth=4,
+        num_classes=OUT_FEATURES if OUT_FEATURES > 1 else 2,
+        dim=192,  # Scaled down for ~2.34M params (was 256)
+        depth=2,  # Scaled down for ~2.34M params (was 4)
         num_heads=8,
         latent_dim=128,
         num_shared=1,
         num_routed=4,
         top_k=2,
+        window_size=7,
     )
 
     config.lightning_wrapper_class = LazyConfig(MILWrapper)(
@@ -87,7 +84,7 @@ def get_config() -> ExperimentConfig:
 
     config.wandb = WandbConfig(
         project="wsi-classification-test",
-        job_group="digestpath_deepseek_spatial_vit_rope",
+        job_group="camely_window_deepseek_spatial_vit",
     )
 
     return config
