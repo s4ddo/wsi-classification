@@ -98,7 +98,7 @@ def get_config() -> ExperimentConfig:
 
     # Weights & Biases logging
     config.wandb = WandbConfig(
-        project="camely",
+        project="final_camely",
         job_group="clam_mb",
     )
 

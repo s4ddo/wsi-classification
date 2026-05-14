@@ -88,7 +88,7 @@ def get_config() -> ExperimentConfig:
 
     # W&B Logging
     config.wandb = WandbConfig(
-        project="camely",
+        project="final_camely",
         job_group="baseline_abmil",
     )
 

@@ -84,7 +84,7 @@ def get_config() -> ExperimentConfig:
     )
 
     config.wandb = WandbConfig(
-        project="camely",
+        project="final_camely",
         job_group="camely_adventurer",
     )
 

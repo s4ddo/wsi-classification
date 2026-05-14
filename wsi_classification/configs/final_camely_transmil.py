@@ -94,7 +94,7 @@ def get_config() -> ExperimentConfig:
 
     # Wandb
     config.wandb = WandbConfig(
-        project="camely",
+        project="final_camely",
         job_group="digestpath_transmil_nystrom",
     )
 
