@@ -43,7 +43,7 @@ def get_config() -> ExperimentConfig:
     config = ExperimentConfig()
     config.debug = False  # Debug mode: single batch, no W&B
     config.seed = 42
-    config.test.do = True
+    config.test.do = False
 
     # Dataset: H5 feature bags from debugging dataset
     config.dataset = LazyConfig(H5FeatureBagDataModule)(

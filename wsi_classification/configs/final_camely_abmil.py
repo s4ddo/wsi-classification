@@ -38,7 +38,7 @@ def get_config() -> ExperimentConfig:
     config = ExperimentConfig()
     config.debug = False # set to False to actually train
     config.seed = 42
-    config.test.do = True
+    config.test.do = False
 
     # Dataset: Connects to your H5 extraction
     config.dataset = LazyConfig(H5FeatureBagDataModule)(
