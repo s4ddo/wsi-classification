@@ -138,7 +138,6 @@ class DeepSeekSpatialViT(nn.Module):
     Processes a bag of patch features alongside their 2D WSI coordinates.  Each
     patch position is encoded via a learned spatial MLP and added to the projected
     features before being passed through a stack of DeepSeek-style ViT blocks.
-    Classification is performed with a learnable CLS token.
 
     Args:
         in_features: Dimension of each patch feature vector (e.g. 1024 for UNI).
@@ -162,7 +161,7 @@ class DeepSeekSpatialViT(nn.Module):
         dim: int = 128,
         depth: int = 4,
         num_heads: int = 4,
-        hidden_dim: int = 256,
+        hidden_dim: int = 256,  # Kept for compat
         latent_dim: int = 64,
         num_shared: int = 1,
         num_routed: int = 4,
@@ -174,15 +173,20 @@ class DeepSeekSpatialViT(nn.Module):
 
         self.feature_proj = nn.Linear(in_features, dim)
         self.pos_embed = _SpatialEncoding(dim)
-        self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
 
         self.blocks = nn.ModuleList([
-            _ViTBlock(dim, num_heads, latent_dim, num_shared, num_routed, top_k, hidden_dim)
+            _ViTBlock(dim, num_heads, latent_dim, num_shared, num_routed, top_k, dim * 2)
             for _ in range(depth)
         ])
 
+        self.attn_pool = nn.Sequential(
+            nn.Linear(dim, dim // 2),
+            nn.Tanh(),
+            nn.Linear(dim // 2, 1)
+        )
+
         self.norm = nn.LayerNorm(dim)
-        self.head = nn.Linear(dim, out_features)
+        self.head = nn.Linear(dim * 2, out_features)
 
     def forward(self, x: torch.Tensor, coords: torch.Tensor | None = None) -> dict:
         """Run a forward pass over a feature bag.
@@ -210,12 +214,16 @@ class DeepSeekSpatialViT(nn.Module):
         if coords is not None:
             x = x + self.pos_embed(coords)
 
-        cls_tokens = self.cls_token.expand(B, -1, -1)
-        x = torch.cat((cls_tokens, x), dim=1)
-
         for block in self.blocks:
             x = block(x)
 
         x = self.norm(x)
-        logits = self.head(x[:, 0])
+
+        mean_pooled = x.mean(dim=1)
+        attn_weights = F.softmax(self.attn_pool(x), dim=1)  # [B, N, 1]
+        attn_pooled = torch.sum(attn_weights * x, dim=1)  # [B, dim]
+
+        pooled = torch.cat([attn_pooled, mean_pooled], dim=-1)
+        logits = self.head(pooled)
+
         return {"logits": logits}

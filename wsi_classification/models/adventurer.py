@@ -12,7 +12,7 @@ class MambaBlock(nn.Module):
             from mamba_ssm import Mamba2
         except ImportError:
             raise ImportError(
-                "Please `pip install mamba-ssm` or do not use this model."
+                "Please `pip install mamba-ssm[causal-conv1d] --no-build-isolation` or do not use this model."
             )
 
         self.norm1 = nn.LayerNorm(dim)
@@ -133,7 +133,12 @@ class Adventurer(nn.Module):
 
         # Pass through Mamba blocks
         for block in self.blocks:
+            # Prepend global mean as direction token
+            avg = x.mean(dim=1, keepdim=True)
+            x = torch.cat([avg, x], dim=1)
+            # Run block
             x = block(x)
+            x = x[:, 1:]  # Discard heading token
 
         x = self.norm_f(x)
 
