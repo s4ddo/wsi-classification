@@ -125,15 +125,21 @@ class DeepSeekSpatialViTRoPE(nn.Module):
 
         self.feature_proj = nn.Linear(input_dim, dim)
         self.pos_embed = SpatialEncoding(dim)  # Dynamic positional embedding generator
-        self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
 
         self.blocks = nn.ModuleList([
             ViTBlock(dim, num_heads, latent_dim, num_shared, num_routed, top_k, dim * 2)
             for _ in range(depth)
         ])
 
+        # Attention pooling for better aggregation
+        self.attn_pool = nn.Sequential(
+            nn.Linear(dim, dim // 2),
+            nn.Tanh(),
+            nn.Linear(dim // 2, 1)
+        )
+
         self.norm = nn.LayerNorm(dim)
-        self.head = nn.Linear(dim, num_classes)
+        self.head = nn.Linear(dim * 2, num_classes)
 
     def forward(self, x, coords=None):
         """
@@ -153,16 +159,21 @@ class DeepSeekSpatialViTRoPE(nn.Module):
         spatial_tokens = self.pos_embed(coords)
         x = x + spatial_tokens
 
-        # 3. Prepend CLS token for classification
-        cls_tokens = self.cls_token.expand(B, -1, -1)
-        x = torch.cat((cls_tokens, x), dim=1)  # -> [B, N+1, dim]
-
         # Pass through Transformer blocks
         for block in self.blocks:
             x = block(x, coords)
 
         x = self.norm(x)
 
-        # Classification using only the CLS token output
-        logits = self.head(x[:, 0])
+        # Attention pooling - learns to weight important tokens
+        attn_weights = F.softmax(self.attn_pool(x), dim=1)  # [B, N, 1]
+        attn_pooled = torch.sum(attn_weights * x, dim=1)    # [B, dim]
+
+        # Mean pooling as additional global feature
+        mean_pooled = x.mean(dim=1)                         # [B, dim]
+
+        # Combine both pooling methods
+        pooled = torch.cat([attn_pooled, mean_pooled], dim=-1)
+
+        logits = self.head(pooled)
         return {"logits": logits}

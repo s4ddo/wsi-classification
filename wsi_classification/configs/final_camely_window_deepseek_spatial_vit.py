@@ -48,7 +48,7 @@ def get_config() -> ExperimentConfig:
 
     config.net = LazyConfig(WinDeepSeekSpatialViT)(
         input_dim=IN_FEATURES,
-        num_classes=OUT_FEATURES if OUT_FEATURES > 1 else 2,
+        num_classes=OUT_FEATURES,
         dim=192,  # Scaled down for ~2.34M params (was 256)
         depth=2,  # Scaled down for ~2.34M params (was 4)
         num_heads=8,
