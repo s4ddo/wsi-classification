@@ -41,20 +41,28 @@ class _SimplifiedMLA(nn.Module):
 
     def _sparse_local_attention(self, q: torch.Tensor, k: torch.Tensor,
                                v: torch.Tensor) -> torch.Tensor:
-        """Local window attention using sliding window (±window_size)."""
+        """Local window attention using sliding window (±window_size).
+
+        Fully vectorized implementation using unfold for efficiency on GPU.
+        """
         B, H, N, D = q.shape
         w = self.window_size
+        window_len = 2 * w + 1
 
-        k_pad = F.pad(k.transpose(2, 3), (w, w)).transpose(2, 3)
-        v_pad = F.pad(v.transpose(2, 3), (w, w)).transpose(2, 3)
+        # Pad k,v: [B, H, N, D] -> [B, H, N+2w, D]
+        k_pad = F.pad(k, (0, 0, w, w))
+        v_pad = F.pad(v, (0, 0, w, w))
 
-        out = torch.zeros_like(q)
-        for i in range(N):
-            k_win = k_pad[:, :, i:i+2*w+1, :]
-            v_win = v_pad[:, :, i:i+2*w+1, :]
-            scores = torch.matmul(q[:, :, i:i+1, :], k_win.transpose(-2, -1)) / (D ** 0.5)
-            attn = F.softmax(scores, dim=-1)
-            out[:, :, i, :] = torch.matmul(attn, v_win).squeeze(2)
+        # Use unfold to extract sliding windows: [B, H, N, window_len, D]
+        k_windows = k_pad.unfold(dimension=2, size=window_len, step=1).permute(0, 1, 2, 4, 3)
+        v_windows = v_pad.unfold(dimension=2, size=window_len, step=1).permute(0, 1, 2, 4, 3)
+
+        # Compute attention scores: [B, H, N, 1, D] @ [B, H, N, D, window_len] -> [B, H, N, 1, window_len]
+        scores = torch.matmul(q.unsqueeze(3), k_windows.transpose(-2, -1)) / (D ** 0.5)
+        attn = F.softmax(scores, dim=-1)
+
+        # Apply attention to values: [B, H, N, 1, window_len] @ [B, H, N, window_len, D] -> [B, H, N, 1, D]
+        out = torch.matmul(attn, v_windows).squeeze(3)
 
         return out
 
@@ -86,18 +94,37 @@ class _DeepSeekMoE(nn.Module):
         B, N, C = x.shape
         x_flat = x.view(-1, C)
 
+        # Shared experts (always active)
         shared_out = sum(expert(x_flat) for expert in self.shared_experts)
 
+        # Routing
         route_probs = F.softmax(self.router(x_flat), dim=-1)
         topk_probs, topk_indices = torch.topk(route_probs, self.top_k, dim=-1)
 
+        # Vectorized routed expert computation
         routed_out = torch.zeros_like(x_flat)
-        for i, expert in enumerate(self.routed_experts):
-            mask = (topk_indices == i)
-            if mask.any():
-                idx_tokens, idx_k = torch.where(mask)
-                expert_out = expert(x_flat[idx_tokens]) * topk_probs[idx_tokens, idx_k].unsqueeze(-1)
-                routed_out.index_add_(0, idx_tokens, expert_out)
+        if x_flat.size(0) > 0:  # Check for empty input
+            # topk_indices: [num_tokens, top_k], topk_probs: [num_tokens, top_k]
+            # For each expert, find which tokens route to it
+            num_tokens = x_flat.size(0)
+
+            # Create token indices repeated for each top-k position
+            token_indices = torch.arange(num_tokens, device=x_flat.device).unsqueeze(1).expand(-1, self.top_k)
+
+            # Flatten for processing
+            flat_tokens = token_indices.reshape(-1)  # [num_tokens * top_k]
+            flat_experts = topk_indices.reshape(-1)   # [num_tokens * top_k]
+            flat_probs = topk_probs.reshape(-1)       # [num_tokens * top_k]
+
+            # Process each expert in parallel where possible
+            for i, expert in enumerate(self.routed_experts):
+                mask = (flat_experts == i)
+                if mask.any():
+                    expert_tokens = flat_tokens[mask]
+                    expert_probs = flat_probs[mask]
+                    expert_input = x_flat[expert_tokens]
+                    expert_out = expert(expert_input) * expert_probs.unsqueeze(-1)
+                    routed_out.index_add_(0, expert_tokens, expert_out)
 
         return (shared_out + routed_out).view(B, N, C)
 
