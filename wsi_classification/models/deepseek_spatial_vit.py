@@ -43,26 +43,38 @@ class _SimplifiedMLA(nn.Module):
                                v: torch.Tensor) -> torch.Tensor:
         """Local window attention using sliding window (±window_size).
 
-        Fully vectorized implementation using unfold for efficiency on GPU.
+        Chunked implementation for memory efficiency with very long sequences.
         """
         B, H, N, D = q.shape
         w = self.window_size
         window_len = 2 * w + 1
 
-        # Pad k,v: [B, H, N, D] -> [B, H, N+2w, D]
+        # Process in chunks to limit memory usage (chunk size ~2k tokens)
+        chunk_size = 2048
+        out = torch.empty_like(q)
+
+        # Pad k,v once: [B, H, N, D] -> [B, H, N+2w, D]
         k_pad = F.pad(k, (0, 0, w, w))
         v_pad = F.pad(v, (0, 0, w, w))
 
-        # Use unfold to extract sliding windows: [B, H, N, window_len, D]
-        k_windows = k_pad.unfold(dimension=2, size=window_len, step=1).permute(0, 1, 2, 4, 3)
-        v_windows = v_pad.unfold(dimension=2, size=window_len, step=1).permute(0, 1, 2, 4, 3)
+        for start in range(0, N, chunk_size):
+            end = min(start + chunk_size, N)
+            q_chunk = q[:, :, start:end, :]  # [B, H, chunk, D]
 
-        # Compute attention scores: [B, H, N, 1, D] @ [B, H, N, D, window_len] -> [B, H, N, 1, window_len]
-        scores = torch.matmul(q.unsqueeze(3), k_windows.transpose(-2, -1)) / (D ** 0.5)
-        attn = F.softmax(scores, dim=-1)
+            # Extract windows for this chunk: [B, H, chunk, window_len, D]
+            k_windows = k_pad[:, :, start:start + end - start + 2*w, :].unfold(
+                dimension=2, size=window_len, step=1
+            ).permute(0, 1, 2, 4, 3)
+            v_windows = v_pad[:, :, start:start + end - start + 2*w, :].unfold(
+                dimension=2, size=window_len, step=1
+            ).permute(0, 1, 2, 4, 3)
 
-        # Apply attention to values: [B, H, N, 1, window_len] @ [B, H, N, window_len, D] -> [B, H, N, 1, D]
-        out = torch.matmul(attn, v_windows).squeeze(3)
+            # Compute attention for this chunk
+            scores = torch.matmul(q_chunk.unsqueeze(3), k_windows.transpose(-2, -1)) / (D ** 0.5)
+            attn = F.softmax(scores, dim=-1)
+            out_chunk = torch.matmul(attn, v_windows).squeeze(3)
+
+            out[:, :, start:end, :] = out_chunk
 
         return out
 
