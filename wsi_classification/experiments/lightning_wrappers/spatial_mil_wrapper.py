@@ -25,13 +25,15 @@ class SpatialMILWrapper(MILWrapper):
 
         if not self.multiclass and self.use_bce_loss:
             loss = self.loss_metric(logits, labels.float())
-            preds = (torch.sigmoid(logits) >= 0.5).int()
+            probs = torch.sigmoid(logits)
+            preds = (probs >= 0.5).int()
         else:
             loss = self.loss_metric(logits, labels)
+            probs = torch.softmax(logits, dim=-1)
             preds = torch.argmax(logits, dim=-1)
 
         accuracy_calculator.update(preds, labels)
-        return loss, preds, {"logits": logits}
+        return loss, preds, {"logits": logits, "probs": probs}
 
     def test_step(self, batch: dict, batch_idx: int) -> None:
         """Perform one test step with spatial coordinates.
@@ -52,14 +54,16 @@ class SpatialMILWrapper(MILWrapper):
         logits = output_dict["logits"].squeeze(1)
 
         if not self.multiclass and self.use_bce_loss:
-            preds = (torch.sigmoid(logits) >= 0.5).int()
             probs = torch.sigmoid(logits)
+            preds = (probs >= 0.5).int()
         else:
-            preds = torch.argmax(logits, dim=-1)
             probs = torch.softmax(logits, dim=-1)
+            preds = torch.argmax(logits, dim=-1)
 
-        # Update accuracy metric
+        # Update metrics
         self.test_acc.update(preds, labels)
+        self.test_auroc.update(probs, labels)
+        self.test_f1.update(preds, labels)
 
         # Log predictions per slide
         for slide_name, pred, prob, label in zip(slide_names, preds, probs, labels):
