@@ -99,8 +99,8 @@ checkpoint_path="checkpoints/transmil.ckpt"
 
     # Wandb
     config.wandb = WandbConfig(
-        project="final_camely_10
-",
+        project="final_camely_10"
+,
         job_group="digestpath_transmil_nystrom",
     )
 

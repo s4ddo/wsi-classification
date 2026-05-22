@@ -97,8 +97,8 @@ def get_config() -> ExperimentConfig:
     )
 
     config.wandb = WandbConfig(
-        project="final_camely_10
-",
+        project="final_camely_10"
+,
         job_group="camely_slide_moe",
     )
 

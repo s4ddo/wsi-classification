@@ -103,8 +103,8 @@ checkpoint_path="checkpoints/clam.ckpt"
 
     # Weights & Biases logging
     config.wandb = WandbConfig(
-        project="final_camely_10
-",
+        project="final_camely_10"
+,
         job_group="clam_mb",
     )
 
