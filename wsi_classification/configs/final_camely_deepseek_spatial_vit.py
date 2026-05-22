@@ -47,8 +47,7 @@ def get_config() -> ExperimentConfig:
     # Test configuration with checkpoint path
     config.test = TestConfig(
         do=True,
-
-checkpoint_path="checkpoints/transmil.ckpt"
+        #checkpoint_path"checkpoints/transmil.ckpt"
     )
 
     config.dataset = LazyConfig(H5FeatureBagDataModule)(

@@ -47,8 +47,8 @@ def get_config() -> ExperimentConfig:
     config.seed = 42
     # Test configuration with checkpoint path
     config.test = TestConfig(
-        do=True,
-        checkpoint_path=""
+        do=True
+        #checkpoint_path=""
     )
 
     config.dataset = LazyConfig(H5FeatureBagDataModule)(
