@@ -5,7 +5,7 @@ Usage:
 """
 
 import torch
-from wsi_classification.experiments.default_cfg import ExperimentConfig, SchedulerConfig, TrainConfig, WandbConfig
+from wsi_classification.experiments.default_cfg import ExperimentConfig, SchedulerConfig, TestConfig, TrainConfig, WandbConfig
 from wsi_classification.experiments.utils.lazy_config import LazyConfig
 
 from wsi_classification.models.deepseek_spatial_vit import DeepSeekSpatialViT
@@ -44,7 +44,11 @@ def get_config() -> ExperimentConfig:
     config = ExperimentConfig()
     config.debug = False
     config.seed  = 42
-    config.test.do = Truie
+    # Test configuration with checkpoint path
+    config.test = TestConfig(
+        do=True,
+        checkpoint_path="/home/s4ddo/Uni/wsi-classification/checkpoints/transmil.ckpt"
+    )
 
     config.dataset = LazyConfig(H5FeatureBagDataModule)(
         train_csv=TRAIN_CSV,

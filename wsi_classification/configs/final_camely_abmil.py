@@ -7,7 +7,7 @@ Usage:
 import torch
 from pathlib import Path
 
-from wsi_classification.experiments.default_cfg import ExperimentConfig, SchedulerConfig, TrainConfig, WandbConfig
+from wsi_classification.experiments.default_cfg import ExperimentConfig, SchedulerConfig, TestConfig, TrainConfig, WandbConfig
 from wsi_classification.experiments.utils.lazy_config import LazyConfig
 
 from wsi_classification.models.abmil import ABMIL
@@ -38,7 +38,11 @@ def get_config() -> ExperimentConfig:
     config = ExperimentConfig()
     config.debug = False # set to False to actually train
     config.seed = 42
-    config.test.do = Truie
+    # Test configuration with checkpoint path
+    config.test = TestConfig(
+        do=True,
+        checkpoint_path="/home/s4ddo/Uni/wsi-classification/checkpoints/abmil.ckpt"
+    )
 
     # Dataset: Connects to your H5 extraction
     config.dataset = LazyConfig(H5FeatureBagDataModule)(

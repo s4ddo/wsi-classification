@@ -29,6 +29,7 @@ class TestConfig:
     """Test configuration."""
 
     do: bool = True
+    checkpoint_path: Optional[str] = None  # Path to checkpoint for test-only evaluation
 
 
 @dataclass
