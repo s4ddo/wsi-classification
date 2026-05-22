@@ -32,11 +32,11 @@ EMBED_DIM = 1280  # Input feature dimension
 # ─── Training Hyperparameters ─────────────────────────────────
 BATCH_SIZE = 1  # MIL standard: one slide per batch
 NUM_WORKERS = 4
-TRAINING_ITERATIONS = 1000
+TRAINING_ITERATIONS = 1_000
 WARMUP_ITERATIONS_PERCENTAGE = 0.1
 LEARNING_RATE = 1e-4
-WEIGHT_DECAY = 1e-5
-GRAD_CLIP = 1.0
+WEIGHT_DECAY = 5e-4
+GRAD_CLIP = 0.5
 PRECISION = "bf16-mixed"
 
 
