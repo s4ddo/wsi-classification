@@ -47,7 +47,7 @@ def get_config() -> ExperimentConfig:
     # Test configuration with checkpoint path
     config.test = TestConfig(
         do=True,
-        checkpoint_path="/home/s4ddo/Uni/wsi-classification/checkpoints/clam.ckpt"
+        checkpoint_path="checkpoints/clam.ckpt"
     )
 
     # Dataset module
