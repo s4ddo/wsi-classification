@@ -3,6 +3,7 @@ import torch
 from torch.utils.data import DataLoader
 import h5py
 from pathlib import Path
+import pandas as pd
 
 from wsi_classification.datasets.h5_slidedataset.h5_dataset import H5FeatureBagDataset
 
@@ -83,28 +84,56 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
             if self.input_channels is None:
                 self.input_channels = 1280
 
+    def _build_label_map_from_csv(self, csv_path: str) -> dict:
+        """Build a consistent label mapping from a CSV file.
+
+        Maps string labels to integers based on first occurrence in the CSV.
+        This ensures consistent label mapping across train/val/test datasets.
+
+        Args:
+            csv_path: Path to the CSV file containing labels.
+
+        Returns:
+            Dictionary mapping string labels to integer indices.
+        """
+        df = pd.read_csv(csv_path)
+        label_map = {}
+        for raw_label in df[self.label_col_name]:
+            if isinstance(raw_label, str) and raw_label not in label_map:
+                label_map[raw_label] = len(label_map)
+        return label_map
+
     def setup(self, stage: str | None = None) -> None:
         """Instantiate train, validation, and test datasets.
+
+        Uses a consistent label mapping derived from the training CSV to ensure
+        label alignment across all splits (critical for correct test evaluation).
 
         Args:
             stage: Either ``"fit"``, ``"test"``, or ``None``.
         """
+        # Build consistent label map from train CSV
+        label_map = self._build_label_map_from_csv(self.train_csv)
+
         if stage in ("fit", None):
             self.train_dataset = H5FeatureBagDataset(
                 csv_path=self.train_csv,
                 features_dir=self.features_dir,
                 label_col_name=self.label_col_name,
+                label_map=label_map,
             )
             self.val_dataset = H5FeatureBagDataset(
                 csv_path=self.val_csv,
                 features_dir=self.features_dir,
                 label_col_name=self.label_col_name,
+                label_map=label_map,
             )
         if stage in ("test", None) and self.test_csv is not None:
             self.test_dataset = H5FeatureBagDataset(
                 csv_path=self.test_csv,
                 features_dir=self.features_dir,
                 label_col_name=self.label_col_name,
+                label_map=label_map,
             )
 
     def train_dataloader(self) -> DataLoader:
