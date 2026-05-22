@@ -97,12 +97,10 @@ class RoutingAttention(nn.Module):
         out_routed = out_routed.view(b, h_dim, k_dim, w_dim, d_dim)
 
         out = torch.zeros_like(Q)
-        out_routed_flat = out_routed.view(1, self.num_heads, self.k * w, self.head_dim)
-        out.scatter_add_(2, Q_idx_flat, out_routed_flat)
-
-        counts = torch.zeros(1, self.num_heads, N_padded, 1, device=out.device, dtype=torch.float32)
-        ones_idx = torch.ones_like(Q_idx, dtype=torch.float32)
-        counts.scatter_add_(2, Q_idx.view(1, self.num_heads, self.k * w, 1), ones_idx.view(1, self.num_heads, self.k * w, 1))
+        out.scatter_add_(2, Q_idx_flat, out_routed.view(1, self.num_heads, self.k * w, self.head_dim))
+        
+        counts = torch.zeros(1, self.num_heads, N_padded, 1, device=out.device)
+        counts.scatter_add_(2, Q_idx.view(1, self.num_heads, self.k * w, 1), torch.ones_like(Q_idx).view(1, self.num_heads, self.k * w, 1).float())
         counts = counts.clamp(min=1.0)
         out = out / counts
 
@@ -122,15 +120,15 @@ class RoutingAttention(nn.Module):
             with torch.no_grad():
                 _, cluster_assignments = Q_prod.max(dim=2)
                 new_centroids = torch.zeros_like(self.centroids)
-
-                for c in range(self.k):
-                    mask_c = (cluster_assignments[0, :, :] == c).unsqueeze(-1)  # [num_heads, N_padded, 1]
-                    cluster_means = (Q_norm[0, :, :, :] * mask_c).sum(dim=1) / mask_c.sum(dim=1).clamp(min=1.0)
-                    new_centroids[:, c, :] = cluster_means
-
-                empty_mask = (new_centroids.abs().sum(dim=-1, keepdim=True) == 0)
-                new_centroids = torch.where(empty_mask.expand_as(self.centroids), self.centroids, new_centroids)
-
+                for h in range(self.num_heads):
+                    for c in range(self.k):
+                        mask_c = (cluster_assignments[0, h] == c).unsqueeze(-1)
+                        if mask_c.sum() > 0:
+                            cluster_mean = (Q_norm[0, h] * mask_c).sum(dim=0) / mask_c.sum()
+                            new_centroids[h, c] = cluster_mean
+                        else:
+                            new_centroids[h, c] = self.centroids[h, c]
+                
                 self.centroids.copy_(
                     F.normalize(self.decay * self.centroids + (1 - self.decay) * new_centroids, p=2, dim=-1)
                 )
