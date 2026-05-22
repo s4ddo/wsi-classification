@@ -38,8 +38,8 @@ def get_config() -> ExperimentConfig:
     # Test configuration with checkpoint path
     config.test = TestConfig(
         do=True,
-        checkpoint_path=""
-        #checkpoint_path="checkpoints/windowed.ckpt"
+
+checkpoint_path="checkpoints/windowed.ckpt"
     )
 
     config.dataset = LazyConfig(H5FeatureBagDataModule)(
