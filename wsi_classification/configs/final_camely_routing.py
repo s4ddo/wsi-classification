@@ -92,7 +92,7 @@ def get_config() -> ExperimentConfig:
 
     # Wandb
     config.wandb = WandbConfig(
-        project="final_camely",
+        project="final_camely_with_test_and_auroc",
         job_group="camely_routing",
     )
 

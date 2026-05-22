@@ -83,7 +83,7 @@ def get_config() -> ExperimentConfig:
     )
 
     config.wandb = WandbConfig(
-        project="final_camely",
+        project="final_camely_with_test_and_auroc",
         job_group="camely_window_deepseek_spatial_vit",
     )
 
