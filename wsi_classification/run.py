@@ -123,7 +123,10 @@ def main() -> None:
         log_model = False
         offline = False
 
-    if config.autoresume.enabled:
+    # Use custom name if provided, otherwise generate from config path
+    if config.name is not None:
+        run_name = config.name
+    elif config.autoresume.enabled:
         # If run name is not provided, use the deterministic run name without timestamp
         run_name = (
             get_deterministic_run_name(args.config, args.overrides, use_timestamp=False)

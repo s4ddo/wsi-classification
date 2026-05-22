@@ -105,6 +105,7 @@ class ExperimentConfig:
     compile: bool = False  # Whether to compile the model with torch.compile
     experiment_dir: Optional[str] = None
     num_nodes: int = 1
+    name: Optional[str] = None  # Custom run name (overrides auto-generated name)
 
     dataset: LazyConfig = PLACEHOLDER
     net: LazyConfig = PLACEHOLDER
