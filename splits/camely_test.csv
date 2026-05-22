@@ -88,7 +88,7 @@ test_086,test,normal
 test_087,test,normal
 test_088,test,normal
 test_089,test,tumor
-test_090,test,reference
+test_090,test,normal
 test_091,test,tumor
 test_092,test,normal
 test_093,test,tumor
