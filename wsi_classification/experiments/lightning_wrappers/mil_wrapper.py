@@ -37,10 +37,12 @@ class MILWrapper(LightningWrapperBase):
         self.val_acc = torchmetrics.Accuracy(**acc_kwargs)
         self.test_acc = torchmetrics.Accuracy(**acc_kwargs)
 
-        # AUROC and F1 Score metrics
+        # AUROC, AUPRC and F1 Score metrics
         self.val_auroc = torchmetrics.AUROC(**acc_kwargs)
+        self.val_auprc = torchmetrics.AveragePrecision(**acc_kwargs)
         self.val_f1 = torchmetrics.F1Score(**acc_kwargs)
         self.test_auroc = torchmetrics.AUROC(**acc_kwargs)
+        self.test_auprc = torchmetrics.AveragePrecision(**acc_kwargs)
         self.test_f1 = torchmetrics.F1Score(**acc_kwargs)
 
         self.use_bce_loss = use_bce_loss
@@ -121,8 +123,9 @@ class MILWrapper(LightningWrapperBase):
         probs = output_dict["probs"]
         labels = batch["label"]
 
-        # Update AUROC and F1 metrics
+        # Update AUROC, AUPRC and F1 metrics
         self.val_auroc.update(probs, labels)
+        self.val_auprc.update(probs, labels)
         self.val_f1.update(preds, labels)
 
         self.log(
@@ -133,15 +136,18 @@ class MILWrapper(LightningWrapperBase):
         return loss
 
     def on_validation_epoch_end(self) -> None:
-        """Log epoch-level validation accuracy, AUROC, F1 and reset the accumulators."""
+        """Log epoch-level validation accuracy, AUROC, AUPRC, F1 and reset the accumulators."""
         acc = self.val_acc.compute()
         auroc = self.val_auroc.compute()
+        auprc = self.val_auprc.compute()
         f1 = self.val_f1.compute()
         self.log("val/acc", acc, sync_dist=True)
         self.log("val/auroc", auroc, sync_dist=True)
+        self.log("val/auprc", auprc, sync_dist=True)
         self.log("val/f1", f1, sync_dist=True)
         self.val_acc.reset()
         self.val_auroc.reset()
+        self.val_auprc.reset()
         self.val_f1.reset()
 
     def on_fit_end(self) -> None:
@@ -150,6 +156,7 @@ class MILWrapper(LightningWrapperBase):
             final_metrics = {
                 "final/val_acc": self.trainer.callback_metrics.get("val/acc"),
                 "final/val_auroc": self.trainer.callback_metrics.get("val/auroc"),
+                "final/val_auprc": self.trainer.callback_metrics.get("val/auprc"),
                 "final/val_f1": self.trainer.callback_metrics.get("val/f1"),
             }
             self.logger.experiment.log(final_metrics)
@@ -179,9 +186,10 @@ class MILWrapper(LightningWrapperBase):
             probs = torch.softmax(logits, dim=-1)
             preds = torch.argmax(logits, dim=-1)
 
-        # Update accuracy metric
+        # Update metrics
         self.test_acc.update(preds, labels)
         self.test_auroc.update(probs, labels)
+        self.test_auprc.update(probs, labels)
         self.test_f1.update(preds, labels)
 
         # Log predictions per slide
@@ -196,15 +204,18 @@ class MILWrapper(LightningWrapperBase):
             )
 
     def on_test_epoch_end(self) -> None:
-        """Log epoch-level test accuracy, AUROC, F1 and reset the accumulators."""
+        """Log epoch-level test accuracy, AUROC, AUPRC, F1 and reset the accumulators."""
         acc = self.test_acc.compute()
         auroc = self.test_auroc.compute()
+        auprc = self.test_auprc.compute()
         f1 = self.test_f1.compute()
         self.log("test/acc", acc, sync_dist=True)
         self.log("test/auroc", auroc, sync_dist=True)
+        self.log("test/auprc", auprc, sync_dist=True)
         self.log("test/f1", f1, sync_dist=True)
         self.test_acc.reset()
         self.test_auroc.reset()
+        self.test_auprc.reset()
         self.test_f1.reset()
 
     def on_test_end(self) -> None:
@@ -213,6 +224,7 @@ class MILWrapper(LightningWrapperBase):
             final_metrics = {
                 "final/test_acc": self.trainer.callback_metrics.get("test/acc"),
                 "final/test_auroc": self.trainer.callback_metrics.get("test/auroc"),
+                "final/test_auprc": self.trainer.callback_metrics.get("test/auprc"),
                 "final/test_f1": self.trainer.callback_metrics.get("test/f1"),
             }
             self.logger.experiment.log(final_metrics)

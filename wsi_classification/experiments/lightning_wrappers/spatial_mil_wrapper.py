@@ -63,6 +63,7 @@ class SpatialMILWrapper(MILWrapper):
         # Update metrics
         self.test_acc.update(preds, labels)
         self.test_auroc.update(probs, labels)
+        self.test_auprc.update(probs, labels)
         self.test_f1.update(preds, labels)
 
         # Log predictions per slide
