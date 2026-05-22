@@ -98,7 +98,8 @@ checkpoint_path="checkpoints/transmil_sparse.ckpt"
 
     # Wandb
     config.wandb = WandbConfig(
-        project="final_camely_with_test_and_auroc",
+        project="final_camely_10
+",
         job_group="digestpath_transmil_sparse",
     )
 
