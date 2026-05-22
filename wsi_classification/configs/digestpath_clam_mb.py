@@ -43,7 +43,7 @@ def get_config() -> ExperimentConfig:
     config = ExperimentConfig()
     config.debug = False
     config.seed = 42
-    config.test.do = False  # Skip test phase (no test dataset)
+    config.test.do = Truie  # Skip test phase (no test dataset)
 
     # Dataset module
     config.dataset = LazyConfig(H5FeatureBagDataModule)(

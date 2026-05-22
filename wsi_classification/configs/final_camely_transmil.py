@@ -7,7 +7,7 @@ Usage:
 import torch
 
 from wsi_classification.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
-from wsi_classification.experiments.default_cfg import ExperimentConfig, SchedulerConfig, TrainConfig, WandbConfig
+from wsi_classification.experiments.default_cfg import ExperimentConfig, SchedulerConfig, TestConfig, TrainConfig, WandbConfig
 from wsi_classification.experiments.lightning_wrappers.mil_wrapper import MILWrapper
 from wsi_classification.experiments.utils.lazy_config import LazyConfig
 from wsi_classification.models.transmil import TransMIL
@@ -27,21 +27,26 @@ OUT_FEATURES = 1  # Binary task (cancerous vs non-cancerous)
 HIDDEN_DIM = 512
 NUM_HEADS = 8
 NUM_LANDMARKS = 256
-DROPOUT = 0.1
+DROPOUT = 0.4
 PRECISION = "bf16-mixed"
 
 TRAINING_ITERATIONS = 1_000
-WARMUP_ITERATIONS_PERCENTAGE = 0.05
-LEARNING_RATE = 2e-4
-WEIGHT_DECAY = 1e-4
-GRAD_CLIP = 1.0
+WARMUP_ITERATIONS_PERCENTAGE = 0.1
+LEARNING_RATE = 1e-4
+WEIGHT_DECAY = 5e-4
+GRAD_CLIP = 0.5
 
 
 def get_config() -> ExperimentConfig:
     config = ExperimentConfig()
     config.debug = False
     config.seed = 42
-    config.test.do = False
+    # Test configuration with checkpoint path
+    config.test = TestConfig(
+        do=True,
+        checkpoint_path=""
+        #checkpoint_path="checkpoints/transmil.ckpt"
+    )
 
     # Dataset
     config.dataset = LazyConfig(H5FeatureBagDataModule)(
@@ -52,6 +57,7 @@ def get_config() -> ExperimentConfig:
         label_col_name="label",
         batch_size=BATCH_SIZE,
         num_workers=NUM_WORKERS,
+        subsample_patches=1024,  # Randomly sample 1024 patches per slide per epoch
     )
 
     # Network
@@ -94,7 +100,7 @@ def get_config() -> ExperimentConfig:
 
     # Wandb
     config.wandb = WandbConfig(
-        project="final_camely",
+        project="final_camely_with_test_and_auroc",
         job_group="digestpath_transmil_nystrom",
     )
 

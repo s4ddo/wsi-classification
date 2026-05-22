@@ -37,6 +37,14 @@ class MILWrapper(LightningWrapperBase):
         self.val_acc = torchmetrics.Accuracy(**acc_kwargs)
         self.test_acc = torchmetrics.Accuracy(**acc_kwargs)
 
+        # AUROC, AUPRC and F1 Score metrics
+        self.val_auroc = torchmetrics.AUROC(**acc_kwargs)
+        self.val_auprc = torchmetrics.AveragePrecision(**acc_kwargs)
+        self.val_f1 = torchmetrics.F1Score(**acc_kwargs)
+        self.test_auroc = torchmetrics.AUROC(**acc_kwargs)
+        self.test_auprc = torchmetrics.AveragePrecision(**acc_kwargs)
+        self.test_f1 = torchmetrics.F1Score(**acc_kwargs)
+
         self.use_bce_loss = use_bce_loss
         if self.multiclass and not self.use_bce_loss:
             self.loss_metric = torch.nn.CrossEntropyLoss()
@@ -67,13 +75,15 @@ class MILWrapper(LightningWrapperBase):
 
         if not self.multiclass and self.use_bce_loss:
             loss = self.loss_metric(logits, labels.float())
-            preds = (torch.sigmoid(logits) >= 0.5).int()
+            probs = torch.sigmoid(logits)
+            preds = (probs >= 0.5).int()
         else:
             loss = self.loss_metric(logits, labels)
+            probs = torch.softmax(logits, dim=-1)
             preds = torch.argmax(logits, dim=-1)
 
         accuracy_calculator.update(preds, labels)
-        return loss, preds, {"logits": logits}
+        return loss, preds, {"logits": logits, "probs": probs}
 
     def training_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
         """Perform one training step and log loss.
@@ -109,7 +119,15 @@ class MILWrapper(LightningWrapperBase):
         Returns:
             Scalar validation loss.
         """
-        loss, _, _ = self._step(batch, self.val_acc)
+        loss, preds, output_dict = self._step(batch, self.val_acc)
+        probs = output_dict["probs"]
+        labels = batch["label"]
+
+        # Update AUROC, AUPRC and F1 metrics
+        self.val_auroc.update(probs, labels)
+        self.val_auprc.update(probs, labels)
+        self.val_f1.update(preds, labels)
+
         self.log(
             "val/loss", loss,
             on_step=False, on_epoch=True, sync_dist=True,
@@ -118,10 +136,30 @@ class MILWrapper(LightningWrapperBase):
         return loss
 
     def on_validation_epoch_end(self) -> None:
-        """Log epoch-level validation accuracy and reset the accumulator."""
+        """Log epoch-level validation accuracy, AUROC, AUPRC, F1 and reset the accumulators."""
         acc = self.val_acc.compute()
+        auroc = self.val_auroc.compute()
+        auprc = self.val_auprc.compute()
+        f1 = self.val_f1.compute()
         self.log("val/acc", acc, sync_dist=True)
+        self.log("val/auroc", auroc, sync_dist=True)
+        self.log("val/auprc", auprc, sync_dist=True)
+        self.log("val/f1", f1, sync_dist=True)
         self.val_acc.reset()
+        self.val_auroc.reset()
+        self.val_auprc.reset()
+        self.val_f1.reset()
+
+    def on_fit_end(self) -> None:
+        """Final log at end of training to ensure best validation metrics are captured."""
+        if self.logger is not None:
+            final_metrics = {
+                "final/val_acc": self.trainer.callback_metrics.get("val/acc"),
+                "final/val_auroc": self.trainer.callback_metrics.get("val/auroc"),
+                "final/val_auprc": self.trainer.callback_metrics.get("val/auprc"),
+                "final/val_f1": self.trainer.callback_metrics.get("val/f1"),
+            }
+            self.logger.experiment.log(final_metrics)
 
     def test_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> None:
         """Perform one test step and log predictions with slide names.
@@ -142,14 +180,17 @@ class MILWrapper(LightningWrapperBase):
         logits = output_dict["logits"].squeeze(1)
 
         if not self.multiclass and self.use_bce_loss:
-            preds = (torch.sigmoid(logits) >= 0.5).int()
             probs = torch.sigmoid(logits)
+            preds = (probs >= 0.5).int()
         else:
-            preds = torch.argmax(logits, dim=-1)
             probs = torch.softmax(logits, dim=-1)
+            preds = torch.argmax(logits, dim=-1)
 
-        # Update accuracy metric
+        # Update metrics
         self.test_acc.update(preds, labels)
+        self.test_auroc.update(probs, labels)
+        self.test_auprc.update(probs, labels)
+        self.test_f1.update(preds, labels)
 
         # Log predictions per slide
         for slide_name, pred, prob, label in zip(slide_names, preds, probs, labels):
@@ -163,7 +204,27 @@ class MILWrapper(LightningWrapperBase):
             )
 
     def on_test_epoch_end(self) -> None:
-        """Log epoch-level test accuracy and reset the accumulator."""
+        """Log epoch-level test accuracy, AUROC, AUPRC, F1 and reset the accumulators."""
         acc = self.test_acc.compute()
+        auroc = self.test_auroc.compute()
+        auprc = self.test_auprc.compute()
+        f1 = self.test_f1.compute()
         self.log("test/acc", acc, sync_dist=True)
+        self.log("test/auroc", auroc, sync_dist=True)
+        self.log("test/auprc", auprc, sync_dist=True)
+        self.log("test/f1", f1, sync_dist=True)
         self.test_acc.reset()
+        self.test_auroc.reset()
+        self.test_auprc.reset()
+        self.test_f1.reset()
+
+    def on_test_end(self) -> None:
+        """Final log at end of testing to ensure metrics are captured."""
+        if self.logger is not None:
+            final_metrics = {
+                "final/test_acc": self.trainer.callback_metrics.get("test/acc"),
+                "final/test_auroc": self.trainer.callback_metrics.get("test/auroc"),
+                "final/test_auprc": self.trainer.callback_metrics.get("test/auprc"),
+                "final/test_f1": self.trainer.callback_metrics.get("test/f1"),
+            }
+            self.logger.experiment.log(final_metrics)

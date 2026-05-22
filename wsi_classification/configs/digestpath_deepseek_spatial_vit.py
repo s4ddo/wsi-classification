@@ -43,7 +43,7 @@ def get_config() -> ExperimentConfig:
     config = ExperimentConfig()
     config.debug = False
     config.seed  = 42
-    config.test.do = False
+    config.test.do = Truie
 
     config.dataset = LazyConfig(H5FeatureBagDataModule)(
         train_csv=TRAIN_CSV,

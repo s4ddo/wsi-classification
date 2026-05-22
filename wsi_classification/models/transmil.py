@@ -334,12 +334,17 @@ class TransMIL(nn.Module):
         # Attention pooling for better aggregation
         self.attn_pool = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.LayerNorm(hidden_dim // 2),
             nn.Tanh(),
+            nn.Dropout(dropout),
             nn.Linear(hidden_dim // 2, 1)
         )
 
         self.norm = nn.LayerNorm(hidden_dim)
-        self.classifier = nn.Linear(hidden_dim * 2, out_features)
+        self.classifier = nn.Sequential(
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim * 2, out_features)
+        )
 
     def forward(self, x: torch.Tensor, return_attention: bool = False) -> dict:
         """Run model."""

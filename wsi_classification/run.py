@@ -208,6 +208,19 @@ def main() -> None:
         trainer.validate(model, datamodule=datamodule)
         print("[resume] Validation after resume completed.")
 
+    # Determine checkpoint to use for test/validation
+    test_ckpt_path = None
+    if config.test.checkpoint_path:
+        # Use explicitly provided test checkpoint
+        test_ckpt_path = config.test.checkpoint_path
+        if os.path.isfile(test_ckpt_path):
+            print(f"[test] Will load checkpoint from: {test_ckpt_path}")
+            checkpoint = torch.load(test_ckpt_path, map_location="cpu")
+            model.load_state_dict(checkpoint["state_dict"])
+            print(f"[test] Checkpoint loaded successfully.")
+        else:
+            raise FileNotFoundError(f"[test] Checkpoint not found: {test_ckpt_path}")
+
     # Train
     if config.train.do:
         # Fit with full-state resume if autoresume provided a checkpoint, otherwise it will act as if no autoresume_ckpt_path passed in (it's None).
@@ -222,10 +235,12 @@ def main() -> None:
             print(f"[checkpoint] Skipping weight reload; best checkpoint not found (path={best_ckpt_path!r}).")
 
     # Validate and test before finishing
-    trainer.validate(
-        model,
-        datamodule=datamodule,
-    )
+    # Skip validation if we're in test-only mode with a provided checkpoint
+    if not (config.test.checkpoint_path and not config.train.do):
+        trainer.validate(
+            model,
+            datamodule=datamodule,
+        )
     if config.test.do:
         trainer.test(
             model,

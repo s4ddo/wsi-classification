@@ -5,7 +5,7 @@ Usage:
 """
 
 import torch
-from wsi_classification.experiments.default_cfg import ExperimentConfig, SchedulerConfig, TrainConfig, WandbConfig
+from wsi_classification.experiments.default_cfg import ExperimentConfig, SchedulerConfig, TestConfig, TrainConfig, WandbConfig
 from wsi_classification.experiments.utils.lazy_config import LazyConfig
 
 from wsi_classification.models.deepseek_spatial_vit import DeepSeekSpatialViT
@@ -34,17 +34,22 @@ TOP_K = 2
 PRECISION = "bf16-mixed"
 
 TRAINING_ITERATIONS = 1_000
-WARMUP_ITERATIONS_PERCENTAGE = 0.05
+WARMUP_ITERATIONS_PERCENTAGE = 0.1
 LEARNING_RATE = 1e-4
-WEIGHT_DECAY = 1e-4
-GRAD_CLIP = 1.0
+WEIGHT_DECAY = 5e-4
+GRAD_CLIP = 0.5
 
 
 def get_config() -> ExperimentConfig:
     config = ExperimentConfig()
     config.debug = False
     config.seed  = 42
-    config.test.do = False
+    # Test configuration with checkpoint path
+    config.test = TestConfig(
+        do=True,
+        checkpoint_path=""
+        #checkpoint_path="checkpoints/transmil.ckpt"
+    )
 
     config.dataset = LazyConfig(H5FeatureBagDataModule)(
         train_csv=TRAIN_CSV,
@@ -54,6 +59,7 @@ def get_config() -> ExperimentConfig:
         label_col_name="label",
         batch_size=BATCH_SIZE,
         num_workers=NUM_WORKERS,
+        subsample_patches=1024,  # Randomly sample 1024 patches per slide per epoch
     )
 
     config.net = LazyConfig(DeepSeekSpatialViT)(

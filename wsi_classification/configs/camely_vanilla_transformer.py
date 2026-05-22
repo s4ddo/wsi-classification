@@ -32,7 +32,7 @@ NUM_HEADS = 8
 DEPTH = 4
 PRECISION = "bf16-mixed"
 
-TRAINING_ITERATIONS = 1_000  # Test with enough iterations for scheduler
+TRAINING_ITERATIONS = = 1_000  # Test with enough iterations for scheduler
 WARMUP_ITERATIONS_PERCENTAGE = 0.0  # No warmup for quick test
 LEARNING_RATE = 2e-4
 WEIGHT_DECAY = 1e-4
@@ -43,7 +43,7 @@ def get_config() -> ExperimentConfig:
     config = ExperimentConfig()
     config.debug = False  # Debug mode: single batch, no W&B
     config.seed = 42
-    config.test.do = False
+    config.test.do = Truie
 
     # Dataset: H5 feature bags from debugging dataset
     config.dataset = LazyConfig(H5FeatureBagDataModule)(
