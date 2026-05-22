@@ -42,13 +42,13 @@ def get_config() -> ExperimentConfig:
     # Test configuration with checkpoint path
     config.test = TestConfig(
         do=True,
-
-checkpoint_path="checkpoints/nsa.ckpt"
+        checkpoint_path="checkpoints/nsa.ckpt"
     )
 
     config.dataset = LazyConfig(H5FeatureBagDataModule)(
         train_csv=TRAIN_CSV,
         val_csv=VAL_CSV,
+        test_csv=TEST_CSV,
         features_dir=FEATURES_DIR,
         label_col_name="label",
         batch_size=BATCH_SIZE,
