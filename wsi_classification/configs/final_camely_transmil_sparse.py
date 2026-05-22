@@ -26,7 +26,7 @@ OUT_FEATURES = 1  # Binary task (cancerous vs non-cancerous)
 HIDDEN_DIM = 512
 NUM_HEADS = 8
 SPARSE_WINDOW_SIZE = 7
-DROPOUT = 0.1
+DROPOUT = 0.4
 PRECISION = "bf16-mixed"
 
 TRAINING_ITERATIONS = 1_000
@@ -56,6 +56,7 @@ def get_config() -> ExperimentConfig:
         label_col_name="label",
         batch_size=BATCH_SIZE,
         num_workers=NUM_WORKERS,
+        subsample_patches=1024,  # Randomly sample 1024 patches per slide per epoch
     )
 
     # Network

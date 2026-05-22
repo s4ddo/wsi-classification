@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 from torch.utils.data import Dataset
 import pandas as pd
@@ -11,7 +12,8 @@ class H5FeatureBagDataset(Dataset):
     HDF5 files produced by the FastPathology extraction pipeline.
     Intended for MIL (Multiple Instance Learning) classification.
     """
-    def __init__(self, csv_path, features_dir, label_col_name="label", transform=None, label_map=None):
+    def __init__(self, csv_path, features_dir, label_col_name="label", transform=None, label_map=None,
+                 subsample_patches=None, subsample_seed=None):
         """
         Args:
             csv_path (str): Path to CSV containing 'slidename' and label.
@@ -21,6 +23,10 @@ class H5FeatureBagDataset(Dataset):
             label_map (dict, optional): Pre-defined mapping from string labels to integers.
                 If None, will be inferred from the CSV. Use a consistent label_map across
                 train/val/test splits to ensure correct label alignment.
+            subsample_patches (int, optional): If set, randomly sample this many patches
+                per slide during training. Acts as data augmentation to prevent overfitting.
+            subsample_seed (int, optional): Seed for reproducible subsampling. If None,
+                random sampling varies each epoch.
         """
         super().__init__()
         self.features_dir = Path(features_dir)
@@ -60,6 +66,8 @@ class H5FeatureBagDataset(Dataset):
                 })
         
         self.slides = valid_slides
+        self.subsample_patches = subsample_patches
+        self.subsample_seed = subsample_seed
         print(f"Loaded {len(self.slides)} valid WSI feature bags from {features_dir}")
 
     def __len__(self) -> int:
@@ -89,19 +97,29 @@ class H5FeatureBagDataset(Dataset):
             else:
                 features = f["features"][:] # shape: (N_patches, 1280)
                 coords = f["coords"][:]     # shape: (N_patches, 2)
-            
+
+        # Subsample patches if specified (data augmentation for training)
+        if self.subsample_patches is not None and features.shape[0] > self.subsample_patches:
+            if self.subsample_seed is not None:
+                # Use a deterministic seed based on slide index and global seed
+                np.random.seed(self.subsample_seed + idx)
+            indices = np.random.choice(features.shape[0], self.subsample_patches, replace=False)
+            indices = np.sort(indices)  # Keep spatial coherence
+            features = features[indices]
+            coords = coords[indices]
+
         features_t = torch.from_numpy(features).float()
         coords_t = torch.from_numpy(coords).float()
-        
+
         label = item["label"]
 
         if self.transform is not None:
             features_t = self.transform(features_t)
-        
+
         # Note: MIL models generally expect shape (N, feature_dim).
         return {
-            "input": features_t, 
-            "label": torch.tensor(label, dtype=torch.long), 
-            "slide_name": item["slide_name"], 
+            "input": features_t,
+            "label": torch.tensor(label, dtype=torch.long),
+            "slide_name": item["slide_name"],
             "coords": coords_t
         }

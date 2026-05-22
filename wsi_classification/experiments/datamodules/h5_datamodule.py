@@ -58,6 +58,7 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
         batch_size: int = 1,
         num_workers: int = 4,
         test_csv: str | None = None,
+        subsample_patches: int | None = None,
     ):
         super().__init__()
         self.train_csv = train_csv
@@ -67,6 +68,7 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
         self.label_col_name = label_col_name
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.subsample_patches = subsample_patches
         # Will be set in prepare_data() by inferring from actual H5 files
         self.input_channels = None
         self.output_channels = 1
@@ -121,12 +123,14 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
                 features_dir=self.features_dir,
                 label_col_name=self.label_col_name,
                 label_map=label_map,
+                subsample_patches=self.subsample_patches,
             )
             self.val_dataset = H5FeatureBagDataset(
                 csv_path=self.val_csv,
                 features_dir=self.features_dir,
                 label_col_name=self.label_col_name,
                 label_map=label_map,
+                subsample_patches=None,  # No subsampling for validation
             )
         if stage in ("test", None) and self.test_csv is not None:
             self.test_dataset = H5FeatureBagDataset(
@@ -134,6 +138,7 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
                 features_dir=self.features_dir,
                 label_col_name=self.label_col_name,
                 label_map=label_map,
+                subsample_patches=None,  # No subsampling for test
             )
 
     def train_dataloader(self) -> DataLoader:

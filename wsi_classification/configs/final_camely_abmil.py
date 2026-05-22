@@ -53,7 +53,8 @@ def get_config() -> ExperimentConfig:
         features_dir=FEATURES_DIR,
         label_col_name="label",
         batch_size=BATCH_SIZE,
-        num_workers=NUM_WORKERS
+        num_workers=NUM_WORKERS,
+        subsample_patches=1024,  # Randomly sample 1024 patches per slide per epoch
     )
 
     # Network: The Standard AB-MIL baseline written natively for 1280-dim CLS tokens
