@@ -97,13 +97,10 @@ class CLAM_SB(nn.Module):
             [nn.Linear(hidden[1], 2) for _ in range(n_classes)]
         )
 
-        # Bag classifier with dropout for regularization
-        self.bag_classifiers = nn.ModuleList([
-            nn.Sequential(
-                nn.Dropout(dropout),
-                nn.Linear(hidden[1], 1)
-            ) for _ in range(n_classes)
-        ])
+        # Bag classifier
+        self.bag_classifiers = nn.ModuleList(
+            [nn.Linear(hidden[1], 1) for _ in range(n_classes)]
+        )
 
     def forward(
         self,

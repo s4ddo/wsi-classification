@@ -47,8 +47,8 @@ def get_config() -> ExperimentConfig:
     # Test configuration with checkpoint path
     config.test = TestConfig(
         do=True,
-
-checkpoint_path="checkpoints/transmil.ckpt"
+        checkpoint_path=""
+        #checkpoint_path="checkpoints/transmil.ckpt"
     )
 
     config.dataset = LazyConfig(H5FeatureBagDataModule)(
@@ -59,7 +59,6 @@ checkpoint_path="checkpoints/transmil.ckpt"
         label_col_name="label",
         batch_size=BATCH_SIZE,
         num_workers=NUM_WORKERS,
-        subsample_patches=1024,  # Randomly sample 1024 patches per slide per epoch
     )
 
     config.net = LazyConfig(DeepSeekSpatialViT)(

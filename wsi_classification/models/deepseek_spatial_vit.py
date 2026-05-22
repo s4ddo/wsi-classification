@@ -220,17 +220,12 @@ class DeepSeekSpatialViT(nn.Module):
 
         self.attn_pool = nn.Sequential(
             nn.Linear(dim, dim // 2),
-            nn.LayerNorm(dim // 2),
             nn.Tanh(),
-            nn.Dropout(0.3),
             nn.Linear(dim // 2, 1)
         )
 
         self.norm = nn.LayerNorm(dim)
-        self.head = nn.Sequential(
-            nn.Dropout(0.3),
-            nn.Linear(dim * 2, out_features)
-        )
+        self.head = nn.Linear(dim * 2, out_features)
 
     def forward(self, x: torch.Tensor, coords: torch.Tensor | None = None) -> dict:
         """Run a forward pass over a feature bag.

@@ -40,8 +40,8 @@ def get_config() -> ExperimentConfig:
     # Test configuration with checkpoint path
     config.test = TestConfig(
         do=True,
-
-checkpoint_path="checkpoints/adventurer.ckpt"
+        checkpoint_path=""
+        #checkpoint_path="checkpoints/adventurer.ckpt"
     )
 
     config.dataset = LazyConfig(H5FeatureBagDataModule)(
@@ -50,8 +50,7 @@ checkpoint_path="checkpoints/adventurer.ckpt"
         features_dir=FEATURES_DIR,
         label_col_name="label",
         batch_size=BATCH_SIZE,
-        num_workers=NUM_WORKERS,
-        subsample_patches=1024,  # Randomly sample 1024 patches per slide per epoch
+        num_workers=NUM_WORKERS
     )
 
     config.net = LazyConfig(Adventurer)(
@@ -62,7 +61,7 @@ checkpoint_path="checkpoints/adventurer.ckpt"
         mamba_d_state=128,
         mamba_expand=2,
         mamba_headdim=64,
-        dropout=0.4,
+        dropout=0.1,
         bidirectional=False,
     )
 

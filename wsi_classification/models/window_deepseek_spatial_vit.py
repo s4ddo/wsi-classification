@@ -154,17 +154,12 @@ class WinDeepSeekSpatialViT(nn.Module):
         # Attention pooling for better aggregation
         self.attn_pool = nn.Sequential(
             nn.Linear(dim, dim // 2),
-            nn.LayerNorm(dim // 2),
             nn.Tanh(),
-            nn.Dropout(0.3),
             nn.Linear(dim // 2, 1)
         )
 
         self.norm = nn.LayerNorm(dim)
-        self.head = nn.Sequential(
-            nn.Dropout(0.3),
-            nn.Linear(dim * 2, num_classes)
-        )
+        self.head = nn.Linear(dim * 2, num_classes)
 
     def forward(self, x, coords):
         """

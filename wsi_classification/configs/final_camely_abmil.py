@@ -41,8 +41,8 @@ def get_config() -> ExperimentConfig:
     # Test configuration with checkpoint path
     config.test = TestConfig(
         do=True,
-
-checkpoint_path="checkpoints/abmil.ckpt"
+        checkpoint_path=""
+        #checkpoint_path="checkpoints/abmil.ckpt"
     )
 
     # Dataset: Connects to your H5 extraction
@@ -53,8 +53,7 @@ checkpoint_path="checkpoints/abmil.ckpt"
         features_dir=FEATURES_DIR,
         label_col_name="label",
         batch_size=BATCH_SIZE,
-        num_workers=NUM_WORKERS,
-        subsample_patches=1024,  # Randomly sample 1024 patches per slide per epoch
+        num_workers=NUM_WORKERS
     )
 
     # Network: The Standard AB-MIL baseline written natively for 1280-dim CLS tokens
