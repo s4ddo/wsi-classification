@@ -165,8 +165,20 @@ class SlideMoE(nn.Module):
         pool_hidden: int = 512,
         aux_scorer_head: bool = True,
         patch_dropout: float = 0.0,
+        # Aliases for framework compatibility
+        in_features: int | None = None,
+        out_features: int | None = None,
     ):
         super().__init__()
+        # Use aliases if provided (framework compatibility)
+        if in_features is not None:
+            in_dim = in_features
+        if out_features is not None:
+            num_classes = out_features
+        # Store for external access
+        self.in_features = in_dim
+        self.out_features = num_classes
+
         self.in_proj = nn.Linear(in_dim, model_dim) if in_dim != model_dim else nn.Identity()
         self.input_norm = nn.LayerNorm(model_dim)
         self.scorer = PatchScorer(model_dim, scorer_hidden, dropout)
