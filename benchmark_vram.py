@@ -269,20 +269,18 @@ def main():
                 "avg_time_ms": result["avg_time_ms"],
             })
 
-        except RuntimeError as e:
-            if "out of memory" in str(e).lower():
-                print(f"OOM at N={num_patches}")
-                wandb.log({
-                    "num_patches": num_patches,
-                    "oom": True,
-                })
-                all_results.append({
-                    "num_patches": num_patches,
-                    "oom": True,
-                })
-                torch.cuda.empty_cache()
-            else:
-                raise
+        except Exception as e:
+            # Catch any error (OOM, killed, etc.) and continue
+            print(f"Failed at N={num_patches}: {e}")
+            wandb.log({
+                "num_patches": num_patches,
+                "oom": True,
+            })
+            all_results.append({
+                "num_patches": num_patches,
+                "oom": True,
+            })
+            torch.cuda.empty_cache()
 
     # Create summary table
     print(f"\n{'='*60}")
