@@ -263,25 +263,26 @@ def main():
         else:
             print(f"{n:>10,} {r['peak_vram_mb']:>12.1f} {r['avg_time_ms']:>12.2f} {'OK':>10}")
 
-    # Create scatter plot data
+    # Create summary table for visualization
     valid_results = [r for r in all_results if not r.get("oom")]
     if valid_results:
-        vram_values = [r["peak_vram_mb"] for r in valid_results]
-        time_values = [r["avg_time_ms"] for r in valid_results]
-        n_values = [r["num_patches"] for r in valid_results]
-
-        # Log as a wandb table for custom plots
+        # Log table with model name and N label for custom scatter plots
+        # In wandb UI: create scatter plot with X=peak_vram_mb, Y=avg_time_ms
+        # Group by n_label (different shapes), Color by model (different runs)
         table = wandb.Table(
-            data=[[v, t, n] for v, t, n in zip(vram_values, time_values, n_values)],
-            columns=["peak_vram_mb", "avg_time_ms", "num_patches"]
+            data=[
+                [model_name, f"N={r['num_patches']:,}", r["peak_vram_mb"], r["avg_time_ms"], r["num_patches"]]
+                for r in valid_results
+            ],
+            columns=["model", "n_label", "peak_vram_mb", "avg_time_ms", "num_patches_numeric"]
         )
-        wandb.log({
-            "vram_vs_time": wandb.plot.scatter(
-                table, "peak_vram_mb", "avg_time_ms",
-                title="VRAM vs Time (colored by N)"
-            ),
-            "benchmark_table": table,
-        })
+
+        # Log individual metrics per N for line plots
+        for r in valid_results:
+            wandb.summary[f"vram_n{r['num_patches']}"] = r["peak_vram_mb"]
+            wandb.summary[f"time_n{r['num_patches']}"] = r["avg_time_ms"]
+
+        wandb.log({"benchmark_results": table})
 
     wandb.finish()
     print(f"\nResults logged to wandb project: {args.project}")
