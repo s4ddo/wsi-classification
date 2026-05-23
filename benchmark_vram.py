@@ -66,34 +66,6 @@ def parse_args():
     return parser.parse_args()
 
 
-def check_oom_before_benchmark(num_patches: int, feature_dim: int) -> bool:
-    """Check if benchmark would OOM based on available GPU memory."""
-    if not torch.cuda.is_available():
-        return False
-
-    # Get available GPU memory
-    torch.cuda.synchronize()
-    torch.cuda.empty_cache()
-    free_memory = torch.cuda.mem_get_info()[0]  # Free memory in bytes
-    total_memory = torch.cuda.mem_get_info()[1]
-
-    # Conservative estimate: features + gradients + optimizer states + overhead
-    # features: N * D * 4 bytes (float32)
-    # gradients: ~same as features
-    # optimizer states (Adam): 2x features for momentum buffers
-    # activation overhead: ~20%
-    feature_bytes = num_patches * feature_dim * 4
-    estimated_needed = feature_bytes * 4  # *4 for features + grads + optimizer + overhead
-
-    print(f"  Memory check: {estimated_needed/1024**3:.1f}GB needed, {free_memory/1024**3:.1f}GB free")
-
-    # Leave 10% buffer
-    if estimated_needed > free_memory * 0.9:
-        return True  # Would OOM
-
-    return False  # Should fit
-
-
 def benchmark_n(
     config: ExperimentConfig,
     num_patches: int,
@@ -109,11 +81,6 @@ def benchmark_n(
     print(f"\n{'='*60}")
     print(f"Benchmarking N={num_patches:,} patches, D={feature_dim}")
     print(f"{'='*60}")
-
-    # Pre-check for OOM
-    if check_oom_before_benchmark(num_patches, feature_dim):
-        print(f"OOM pre-check failed for N={num_patches}")
-        raise RuntimeError("CUDA out of memory")
 
     # Create synthetic datamodule
     datamodule = H5FeatureBagDataModule(
