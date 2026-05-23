@@ -10,13 +10,120 @@ Usage:
 import argparse
 import time
 import torch
+import torch.multiprocessing as mp
 from pathlib import Path
 import wandb
+import os
+import json
 
-from wsi_classification.experiments.default_cfg import ExperimentConfig
 from wsi_classification.experiments.utils.cli import load_config_from_file, apply_config_overrides
-from wsi_classification.experiments.utils.lazy_config import instantiate
 from wsi_classification.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
+
+
+# Set multiprocessing start method for CUDA compatibility
+mp.set_start_method('spawn', force=True)
+
+
+def run_benchmark_subprocess(config_path, num_patches, feature_dim, warmup_steps, measure_steps, overrides, result_queue):
+    """Run a single benchmark in a subprocess."""
+    try:
+        import torch
+        import time
+        from pathlib import Path
+        from wsi_classification.experiments.default_cfg import ExperimentConfig
+        from wsi_classification.experiments.utils.cli import load_config_from_file, apply_config_overrides
+        from wsi_classification.experiments.utils.lazy_config import instantiate
+        from wsi_classification.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
+
+        # Load config
+        config = load_config_from_file(config_path)
+        if overrides:
+            config = apply_config_overrides(config, overrides)
+
+        # Create datamodule
+        datamodule = H5FeatureBagDataModule(
+            train_csv="dummy.csv",
+            val_csv="dummy.csv",
+            use_synthetic=True,
+            synthetic_num_patches=num_patches,
+            synthetic_feature_dim=feature_dim,
+            batch_size=1,
+            num_workers=0,
+        )
+        datamodule.prepare_data()
+        datamodule.setup("fit")
+
+        # Build model
+        network = instantiate(config.net, in_features=feature_dim, out_features=1)
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model = instantiate(config.lightning_wrapper_class, network=network, cfg=config)
+        model = model.to(device)
+        model.train()
+
+        optimizer = instantiate(config.optimizer, params=model.parameters())
+        train_loader = datamodule.train_dataloader()
+        data_iter = iter(train_loader)
+
+        # Warmup
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats()
+
+        for _ in range(warmup_steps):
+            try:
+                batch = next(data_iter)
+            except StopIteration:
+                data_iter = iter(train_loader)
+                batch = next(data_iter)
+
+            batch = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+            optimizer.zero_grad()
+            loss = model.training_step(batch, 0)
+            loss.backward()
+            optimizer.step()
+
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+
+        # Measure
+        times = []
+        for step in range(measure_steps):
+            try:
+                batch = next(data_iter)
+            except StopIteration:
+                data_iter = iter(train_loader)
+                batch = next(data_iter)
+
+            batch = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+
+            start = time.perf_counter()
+            optimizer.zero_grad()
+            loss = model.training_step(batch, step)
+            loss.backward()
+            optimizer.step()
+
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            end = time.perf_counter()
+
+            times.append((end - start) * 1000)
+
+        peak_vram_mb = torch.cuda.max_memory_allocated() / 1024**2 if torch.cuda.is_available() else 0
+        avg_time_ms = sum(times) / len(times)
+
+        result_queue.put({
+            "success": True,
+            "num_patches": num_patches,
+            "peak_vram_mb": peak_vram_mb,
+            "avg_time_ms": avg_time_ms,
+            "min_time_ms": min(times),
+            "max_time_ms": max(times),
+        })
+    except Exception as e:
+        result_queue.put({
+            "success": False,
+            "num_patches": num_patches,
+            "error": str(e),
+        })
 
 
 def parse_args():
@@ -66,138 +173,8 @@ def parse_args():
     return parser.parse_args()
 
 
-def benchmark_n(
-    config: ExperimentConfig,
-    num_patches: int,
-    feature_dim: int,
-    warmup_steps: int,
-    measure_steps: int,
-) -> dict:
-    """Benchmark a single N value.
-
-    Returns dict with peak_vram_mb, avg_time_ms, num_patches.
-    Raises RuntimeError with OOM message if out of memory.
-    """
-    print(f"\n{'='*60}")
-    print(f"Benchmarking N={num_patches:,} patches, D={feature_dim}")
-    print(f"{'='*60}")
-
-    # Create synthetic datamodule
-    datamodule = H5FeatureBagDataModule(
-        train_csv="dummy.csv",  # Required but not used for synthetic
-        val_csv="dummy.csv",
-        use_synthetic=True,
-        synthetic_num_patches=num_patches,
-        synthetic_feature_dim=feature_dim,
-        batch_size=1,
-        num_workers=0,
-    )
-    datamodule.prepare_data()
-    datamodule.setup("fit")
-
-    # Update config for this run
-    config_copy = config
-    config_copy.train.iterations = warmup_steps + measure_steps
-    config_copy.train.do = True
-    config_copy.test.do = False
-
-    # Build model
-    network = instantiate(config_copy.net, in_features=feature_dim, out_features=1)
-    if config_copy.compile:
-        network = torch.compile(network)
-    model = instantiate(config_copy.lightning_wrapper_class, network=network, cfg=config_copy)
-
-    # Create trainer with no logging to avoid clutter
-    config_copy.wandb.project = None  # Disable wandb logging for individual runs
-
-    # Setup for measurement
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    if not torch.cuda.is_available():
-        print("WARNING: CUDA not available, VRAM measurement will be 0")
-
-    # Manual training loop for precise measurement
-    model = model.to(device)
-    model.train()
-
-    optimizer = instantiate(config_copy.optimizer, params=model.parameters())
-
-    train_loader = datamodule.train_dataloader()
-    data_iter = iter(train_loader)
-
-    # Warmup
-    print(f"Warming up for {warmup_steps} steps...")
-    torch.cuda.empty_cache()
-    torch.cuda.reset_peak_memory_stats()
-
-    for _ in range(warmup_steps):
-        try:
-            batch = next(data_iter)
-        except StopIteration:
-            data_iter = iter(train_loader)
-            batch = next(data_iter)
-
-        batch = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
-        optimizer.zero_grad()
-        loss = model.training_step(batch, 0)
-        loss.backward()
-        optimizer.step()
-
-    # Synchronize before measurement
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
-
-    # Measure
-    print(f"Measuring for {measure_steps} steps...")
-    times = []
-
-    for step in range(measure_steps):
-        try:
-            batch = next(data_iter)
-        except StopIteration:
-            data_iter = iter(train_loader)
-            batch = next(data_iter)
-
-        batch = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
-
-        start = time.perf_counter()
-        optimizer.zero_grad()
-        loss = model.training_step(batch, step)
-        loss.backward()
-        optimizer.step()
-
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-        end = time.perf_counter()
-
-        times.append((end - start) * 1000)  # Convert to ms
-
-    peak_vram_mb = torch.cuda.max_memory_allocated() / 1024**2 if torch.cuda.is_available() else 0
-    avg_time_ms = sum(times) / len(times)
-
-    # Cleanup
-    del model, network, optimizer, datamodule
-    torch.cuda.empty_cache()
-
-    results = {
-        "num_patches": num_patches,
-        "feature_dim": feature_dim,
-        "peak_vram_mb": peak_vram_mb,
-        "avg_time_ms": avg_time_ms,
-        "min_time_ms": min(times),
-        "max_time_ms": max(times),
-    }
-
-    print(f"Results: VRAM={peak_vram_mb:.1f} MB, Time={avg_time_ms:.2f} ms")
-    return results
-
-
 def main():
     args = parse_args()
-
-    # Load base config
-    config = load_config_from_file(args.config)
-    if args.overrides:
-        config = apply_config_overrides(config, args.overrides)
 
     # Get model name from config path
     model_name = Path(args.config).stem.replace("final_", "")
@@ -216,38 +193,60 @@ def main():
         },
     )
 
-    # Run benchmarks
+    # Run benchmarks in subprocess so OOM kills don't stop main process
     all_results = []
     for num_patches in args.patch_counts:
-        try:
-            result = benchmark_n(
-                config=config,
-                num_patches=num_patches,
-                feature_dim=args.feature_dim,
-                warmup_steps=args.warmup_steps,
-                measure_steps=args.measure_steps,
-            )
-            all_results.append(result)
+        print(f"\n{'='*60}")
+        print(f"Benchmarking N={num_patches:,} patches, D={args.feature_dim}")
+        print(f"{'='*60}")
 
-            # Log individual point
-            wandb.log({
-                "num_patches": num_patches,
-                "peak_vram_mb": result["peak_vram_mb"],
-                "avg_time_ms": result["avg_time_ms"],
-            })
+        result_queue = mp.Queue()
+        process = mp.Process(
+            target=run_benchmark_subprocess,
+            args=(args.config, num_patches, args.feature_dim, args.warmup_steps, args.measure_steps, args.overrides, result_queue)
+        )
+        process.start()
+        process.join(timeout=300)  # 5 minute timeout per benchmark
 
-        except Exception as e:
-            # Catch any error (OOM, killed, etc.) and continue
-            print(f"Failed at N={num_patches}: {e}")
-            wandb.log({
-                "num_patches": num_patches,
-                "oom": True,
-            })
-            all_results.append({
-                "num_patches": num_patches,
-                "oom": True,
-            })
-            torch.cuda.empty_cache()
+        if process.is_alive():
+            # Timeout
+            process.terminate()
+            process.join()
+            print(f"Timeout at N={num_patches}")
+            result = {"num_patches": num_patches, "oom": True}
+        elif process.exitcode != 0:
+            # Process was killed (OOM) or crashed
+            print(f"Process killed/crashed at N={num_patches} (exit code: {process.exitcode})")
+            result = {"num_patches": num_patches, "oom": True}
+        else:
+            # Got result
+            try:
+                subprocess_result = result_queue.get_nowait()
+                if subprocess_result.get("success"):
+                    result = {
+                        "num_patches": subprocess_result["num_patches"],
+                        "peak_vram_mb": subprocess_result["peak_vram_mb"],
+                        "avg_time_ms": subprocess_result["avg_time_ms"],
+                        "min_time_ms": subprocess_result["min_time_ms"],
+                        "max_time_ms": subprocess_result["max_time_ms"],
+                    }
+                    print(f"Results: VRAM={result['peak_vram_mb']:.1f} MB, Time={result['avg_time_ms']:.2f} ms")
+                    wandb.log({
+                        "num_patches": num_patches,
+                        "peak_vram_mb": result["peak_vram_mb"],
+                        "avg_time_ms": result["avg_time_ms"],
+                    })
+                else:
+                    print(f"Failed at N={num_patches}: {subprocess_result.get('error', 'Unknown error')}")
+                    result = {"num_patches": num_patches, "oom": True}
+            except Exception as e:
+                print(f"Failed to get result at N={num_patches}: {e}")
+                result = {"num_patches": num_patches, "oom": True}
+
+        all_results.append(result)
+        torch.cuda.empty_cache()
+        # Small delay to let system recover
+        time.sleep(1)
 
     # Create summary table
     print(f"\n{'='*60}")
