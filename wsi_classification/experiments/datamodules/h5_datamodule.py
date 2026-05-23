@@ -25,7 +25,9 @@ def mil_collate_fn(batch: list[dict]) -> dict:
     inputs = [b["input"] for b in batch]
     labels = torch.stack([b["label"] for b in batch])
     slide_names = [b["slide_name"] for b in batch]
-    coords = [b["coords"] for b in batch]
+    # Handle coords: some datasets return [tensor], others return tensor
+    coords_raw = [b["coords"] for b in batch]
+    coords = [c[0] if isinstance(c, (list, tuple)) else c for c in coords_raw]
 
     inputs = torch.stack(inputs, dim=0) if len(inputs) == 1 else inputs
     coords = torch.stack(coords, dim=0) if len(coords) == 1 else coords
