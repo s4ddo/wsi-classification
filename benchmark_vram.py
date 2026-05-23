@@ -67,24 +67,31 @@ def parse_args():
 
 
 def check_oom_before_benchmark(num_patches: int, feature_dim: int) -> bool:
-    """Try to allocate expected memory to catch OOM early."""
+    """Check if benchmark would OOM based on available GPU memory."""
     if not torch.cuda.is_available():
         return False
 
-    try:
-        # Estimate memory: features (N*D*4 bytes) + model overhead (~2GB)
-        estimated_bytes = num_patches * feature_dim * 4 * 2  # *2 for gradients/optimizer
-        test_tensor_size = min(estimated_bytes // 4, num_patches * feature_dim)
+    # Get available GPU memory
+    torch.cuda.synchronize()
+    torch.cuda.empty_cache()
+    free_memory = torch.cuda.mem_get_info()[0]  # Free memory in bytes
+    total_memory = torch.cuda.mem_get_info()[1]
 
-        # Try to allocate a test tensor
-        test = torch.empty(test_tensor_size, dtype=torch.float32, device='cuda')
-        del test
-        torch.cuda.empty_cache()
-        return False  # No OOM
-    except RuntimeError as e:
-        if "out of memory" in str(e).lower():
-            return True  # Would OOM
-        raise
+    # Conservative estimate: features + gradients + optimizer states + overhead
+    # features: N * D * 4 bytes (float32)
+    # gradients: ~same as features
+    # optimizer states (Adam): 2x features for momentum buffers
+    # activation overhead: ~20%
+    feature_bytes = num_patches * feature_dim * 4
+    estimated_needed = feature_bytes * 4  # *4 for features + grads + optimizer + overhead
+
+    print(f"  Memory check: {estimated_needed/1024**3:.1f}GB needed, {free_memory/1024**3:.1f}GB free")
+
+    # Leave 10% buffer
+    if estimated_needed > free_memory * 0.9:
+        return True  # Would OOM
+
+    return False  # Should fit
 
 
 def benchmark_n(
