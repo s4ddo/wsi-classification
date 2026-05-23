@@ -266,23 +266,39 @@ def main():
     # Create summary table for visualization
     valid_results = [r for r in all_results if not r.get("oom")]
     if valid_results:
-        # Log table with model name and N label for custom scatter plots
-        # In wandb UI: create scatter plot with X=peak_vram_mb, Y=avg_time_ms
-        # Group by n_label (different shapes), Color by model (different runs)
+        # Log table: X=num_patches, Y=avg_time_ms, grouped by model
+        # Different runs (models) will have different colors automatically
         table = wandb.Table(
             data=[
-                [model_name, f"N={r['num_patches']:,}", r["peak_vram_mb"], r["avg_time_ms"], r["num_patches"]]
+                [model_name, r["num_patches"], r["avg_time_ms"], r["peak_vram_mb"]]
                 for r in valid_results
             ],
-            columns=["model", "n_label", "peak_vram_mb", "avg_time_ms", "num_patches_numeric"]
+            columns=["model", "num_patches", "avg_time_ms", "peak_vram_mb"]
         )
 
-        # Log individual metrics per N for line plots
+        # Log time vs num_patches line/scatter plot
+        wandb.log({
+            "time_vs_patches": wandb.plot.line(
+                table, "num_patches", "avg_time_ms",
+                title="Time vs Patch Count",
+                stroke="model"  # Different colors per model
+            ),
+            "benchmark_results": table,
+        })
+
+        # Also log VRAM vs patches
+        wandb.log({
+            "vram_vs_patches": wandb.plot.line(
+                table, "num_patches", "peak_vram_mb",
+                title="VRAM vs Patch Count",
+                stroke="model"
+            ),
+        })
+
+        # Store summary metrics
         for r in valid_results:
             wandb.summary[f"vram_n{r['num_patches']}"] = r["peak_vram_mb"]
             wandb.summary[f"time_n{r['num_patches']}"] = r["avg_time_ms"]
-
-        wandb.log({"benchmark_results": table})
 
     wandb.finish()
     print(f"\nResults logged to wandb project: {args.project}")
