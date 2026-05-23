@@ -31,7 +31,7 @@ def parse_args():
         "--patch-counts",
         nargs="+",
         type=int,
-        default=[10000, 30000, 50000, 70000, 100000],
+        default=[100000, 200000, 300000, 400000, 500000],
         help="List of patch counts to benchmark (default: 10000 30000 50000 70000 100000)",
     )
     parser.add_argument(
@@ -66,6 +66,27 @@ def parse_args():
     return parser.parse_args()
 
 
+def check_oom_before_benchmark(num_patches: int, feature_dim: int) -> bool:
+    """Try to allocate expected memory to catch OOM early."""
+    if not torch.cuda.is_available():
+        return False
+
+    try:
+        # Estimate memory: features (N*D*4 bytes) + model overhead (~2GB)
+        estimated_bytes = num_patches * feature_dim * 4 * 2  # *2 for gradients/optimizer
+        test_tensor_size = min(estimated_bytes // 4, num_patches * feature_dim)
+
+        # Try to allocate a test tensor
+        test = torch.empty(test_tensor_size, dtype=torch.float32, device='cuda')
+        del test
+        torch.cuda.empty_cache()
+        return False  # No OOM
+    except RuntimeError as e:
+        if "out of memory" in str(e).lower():
+            return True  # Would OOM
+        raise
+
+
 def benchmark_n(
     config: ExperimentConfig,
     num_patches: int,
@@ -76,10 +97,16 @@ def benchmark_n(
     """Benchmark a single N value.
 
     Returns dict with peak_vram_mb, avg_time_ms, num_patches.
+    Raises RuntimeError with OOM message if out of memory.
     """
     print(f"\n{'='*60}")
     print(f"Benchmarking N={num_patches:,} patches, D={feature_dim}")
     print(f"{'='*60}")
+
+    # Pre-check for OOM
+    if check_oom_before_benchmark(num_patches, feature_dim):
+        print(f"OOM pre-check failed for N={num_patches}")
+        raise RuntimeError("CUDA out of memory")
 
     # Create synthetic datamodule
     datamodule = H5FeatureBagDataModule(
@@ -263,12 +290,26 @@ def main():
         else:
             print(f"{n:>10,} {r['peak_vram_mb']:>12.1f} {r['avg_time_ms']:>12.2f} {'OK':>10}")
 
-    # Create summary table for visualization
+    # Create summary table for visualization - include OOM rows
+    # Log table: X=num_patches, Y=avg_time_ms, grouped by model
+    table_data = []
+    for r in all_results:
+        if r.get("oom"):
+            # Include OOM rows with None for metrics
+            table_data.append([model_name, r["num_patches"], None, None, "OOM"])
+        else:
+            table_data.append([model_name, r["num_patches"], r["avg_time_ms"], r["peak_vram_mb"], "OK"])
+
+    table = wandb.Table(
+        data=table_data,
+        columns=["model", "num_patches", "avg_time_ms", "peak_vram_mb", "status"]
+    )
+    wandb.log({"benchmark_results": table})
+
+    # Only create plots if we have valid results
     valid_results = [r for r in all_results if not r.get("oom")]
     if valid_results:
-        # Log table: X=num_patches, Y=avg_time_ms, grouped by model
-        # Different runs (models) will have different colors automatically
-        table = wandb.Table(
+        valid_table = wandb.Table(
             data=[
                 [model_name, r["num_patches"], r["avg_time_ms"], r["peak_vram_mb"]]
                 for r in valid_results
@@ -279,17 +320,16 @@ def main():
         # Log time vs num_patches line/scatter plot
         wandb.log({
             "time_vs_patches": wandb.plot.line(
-                table, "num_patches", "avg_time_ms",
+                valid_table, "num_patches", "avg_time_ms",
                 title="Time vs Patch Count",
-                stroke="model"  # Different colors per model
+                stroke="model"
             ),
-            "benchmark_results": table,
         })
 
         # Also log VRAM vs patches
         wandb.log({
             "vram_vs_patches": wandb.plot.line(
-                table, "num_patches", "peak_vram_mb",
+                valid_table, "num_patches", "peak_vram_mb",
                 title="VRAM vs Patch Count",
                 stroke="model"
             ),
@@ -299,6 +339,14 @@ def main():
         for r in valid_results:
             wandb.summary[f"vram_n{r['num_patches']}"] = r["peak_vram_mb"]
             wandb.summary[f"time_n{r['num_patches']}"] = r["avg_time_ms"]
+
+    # Mark OOM boundary - log last successful N as metric
+    oom_results = [r for r in all_results if r.get("oom")]
+    if oom_results:
+        first_oom = min(r["num_patches"] for r in oom_results)
+        wandb.summary["first_oom_n"] = first_oom
+        wandb.summary["max_successful_n"] = max((r["num_patches"] for r in valid_results), default=0)
+        print(f"\nOOM at N={first_oom:,} (last successful: N={wandb.summary['max_successful_n']:,})")
 
     wandb.finish()
     print(f"\nResults logged to wandb project: {args.project}")
