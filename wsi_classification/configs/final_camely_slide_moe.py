@@ -28,10 +28,10 @@ OUT_FEATURES = 1    # Binary task via BCEWithLogitsLoss
 MODEL_DIM = 256     # Scaled down for ~2.3M params (was 1024)
 NUM_LAYERS = 2
 NUM_HEADS = 8
-FFN_HIDDEN = 384    # Scaled down for ~2.3M params (was 2048)
+FFN_HIDDEN = 512    # Scaled down for ~2.3M params (was 2048)
 NUM_EXPERTS = 4
 TOP_K_EXPERTS = 2
-TOP_K_PATCHES = 4000
+TOP_K_PATCHES = 8000
 
 
 
@@ -39,8 +39,8 @@ PRECISION = "bf16-mixed"
 TRAINING_ITERATIONS = 1_000
 WARMUP_ITERATIONS_PERCENTAGE = 0.1
 LEARNING_RATE = 1e-4
-WEIGHT_DECAY = 1e-4
-GRAD_CLIP = 1.0
+WEIGHT_DECAY = 5e-4
+GRAD_CLIP = 0.5
 
 
 def get_config() -> ExperimentConfig:
