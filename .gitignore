@@ -8,6 +8,7 @@ student_debugging_dataset_reduced_256dim
 runs/
 *.zip
 *.md
+*.sh
 transmil_baseline/
 # Byte-compiled / optimized / DLL files
 __pycache__/

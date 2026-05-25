@@ -68,7 +68,9 @@ def get_config() -> ExperimentConfig:
     )
 
     config.lightning_wrapper_class = LazyConfig(SpatialMILWrapper)(
-        use_bce_loss=True,    
+        use_bce_loss=True,
+        aux_scorer_coef=0.1,
+        load_balance_coef=0.01,
     )
 
     config.optimizer = LazyConfig(torch.optim.AdamW)(
